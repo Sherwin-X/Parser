@@ -3,10 +3,14 @@ pub enum TokenType {
     None,
     IntConstant,
     FloatConstant,
+    StringLiteral,
+    CharLiteral,
     Operator,
     Keyword,
     Identifier,
     Punctuation,
+    Comment,
+    Whitespace,
     Invalid,
 }
 
@@ -26,4 +30,19 @@ impl Token {
     pub fn kind(&self) -> &TokenType { &self.token_type }
     pub fn line(&self) -> usize { self.line }
     pub fn col(&self) -> usize { self.col }
+
+    pub fn css_class(&self) -> &'static str {
+        match self.token_type {
+            TokenType::Keyword => "kw",
+            TokenType::Identifier => "id",
+            TokenType::IntConstant | TokenType::FloatConstant => "num",
+            TokenType::StringLiteral | TokenType::CharLiteral => "str",
+            TokenType::Operator => "op",
+            TokenType::Punctuation => "punct",
+            TokenType::Comment => "cmt",
+            TokenType::Whitespace => "ws",
+            TokenType::Invalid => "err",
+            TokenType::None => "tok",
+        }
+    }
 }
