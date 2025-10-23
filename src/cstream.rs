@@ -1,6 +1,8 @@
 use std::fs::File;
 use std::io::{self, Read};
 
+use crate::token::Span;
+
 pub struct CStream {
     src: String,
     idx: usize,
@@ -12,6 +14,8 @@ impl CStream {
     pub fn from_file(path: &str) -> io::Result<Self> {
         let mut s = String::new();
         File::open(path)?.read_to_string(&mut s)?;
+        // 统一换行：CRLF -> LF
+        s = s.replace("\r\n", "\n");
         Ok(Self { src: s, idx: 0, line: 1, col: 0 })
     }
 
@@ -35,8 +39,8 @@ impl CStream {
         Some(ch)
     }
 
-    pub fn position(&self) -> (usize, usize) {
-        (self.line, self.col.saturating_add(1))
+    pub fn position(&self) -> Span {
+        Span { line: self.line, col: self.col.saturating_add(1), offset: self.idx }
     }
 
     pub fn eof(&self) -> bool {
