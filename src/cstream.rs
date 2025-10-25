@@ -7,7 +7,7 @@ pub struct CStream {
     line: usize,
     col: usize,
 }
-
+ 
 impl CStream {
     pub fn from_file(path: &str) -> io::Result<Self> {
         let mut s = String::new();

@@ -8,7 +8,7 @@ pub enum TokenType {
     Identifier,
     Punctuation,
     Invalid,
-}
+} 
 
 #[derive(Debug, Clone)]
 pub struct Token {

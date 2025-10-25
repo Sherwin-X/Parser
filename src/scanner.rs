@@ -7,7 +7,7 @@ mod cstream;
 use cstream::CStream;
 
 pub struct Scanner {
-    cs: CStream,
+    cs: CStream, 
     tokens: Vec<Token>,
 }
 
