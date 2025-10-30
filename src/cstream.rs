@@ -1,4 +1,3 @@
-
 use std::fs::File; use std::io::{self, Read};
 use crate::token::Span;
 #[derive(Clone)] pub struct CStream { src: String, idx: usize, line: usize, col: usize }

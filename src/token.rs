@@ -1,13 +1,7 @@
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Span { pub line: usize, pub col: usize, pub offset: usize }
-
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum TokenType { 
-    None, IntConstant, FloatConstant, StringLiteral, CharLiteral, Operator, Keyword,
-    Identifier, Punctuation, Comment, Preprocessor, Whitespace, Invalid,
-}
-
+pub enum TokenType { None, IntConstant, FloatConstant, StringLiteral, CharLiteral, Operator, Keyword, Identifier, Punctuation, Comment, Preprocessor, Whitespace, Invalid }
 #[derive(Debug, Clone)]
 pub struct Token { text: String, token_type: TokenType, start: Span, end: Span }
 impl Token {

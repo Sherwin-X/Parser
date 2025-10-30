@@ -1,6 +1,5 @@
-
 pub use crate::token::{Token, TokenType, Span};
-#[path = "token.rs"] pub mod token; 
+#[path = "token.rs"] pub mod token;
 #[path = "cstream.rs"] mod cstream;
 use cstream::CStream;
 use std::collections::{HashMap, HashSet};
@@ -105,26 +104,25 @@ impl Scanner {
         if !ok { return Token::new(s, TokenType::Invalid, start, self.cs.position()); }
         Token::new(s, TokenType::CharLiteral, start, self.cs.position())
     }
-    fn read_ident(&mut self)->String{ let mut s=String::new(); while let Some(ch)=self.cs.peek(){ if ch.is_ascii_alphanumeric()||ch=='_'{ s.push(ch); self.next(); } else { break; } } s }
-    fn next(&mut self){ let _ = self.cs.next(); }
+    fn read_ident(&mut self)->String{ let mut s=String::new(); while let Some(ch)=self.cs.peek(){ if ch.is_ascii_alphanumeric()||ch=='_'{ s.push(ch); self.cs.next(); } else { break; } } s }
     fn read_number(&mut self)->(String,bool){
         let mut s=String::new(); let mut is_float=false;
         if self.cs.peek()==Some('0'){
             let a1=self.cs.peek_ahead(1);
-            if matches!(a1,Some('x')|Some('X')){ s.push(self.cs.next().unwrap()); s.push(self.cs.next().unwrap()); while let Some(ch)=self.cs.peek(){ if ch.is_ascii_hexdigit()||ch=='_'{ s.push(ch); self.next(); } else { break; } } s.push_str(&self.read_suffix()); return (s,false); }
-            if matches!(a1,Some('b')|Some('B')){ s.push(self.cs.next().unwrap()); s.push(self.cs.next().unwrap()); while let Some(ch)=self.cs.peek(){ if ch=='0'||ch=='1'||ch=='_'{ s.push(ch); self.next(); } else { break; } } s.push_str(&self.read_suffix()); return (s,false); }
-            if matches!(a1,Some('o')|Some('O')){ s.push(self.cs.next().unwrap()); s.push(self.cs.next().unwrap()); while let Some(ch)=self.cs.peek(){ if ('0'..='7').contains(&ch)||ch=='_'{ s.push(ch); self.next(); } else { break; } } s.push_str(&self.read_suffix()); return (s,false); }
+            if matches!(a1,Some('x')|Some('X')){ s.push(self.cs.next().unwrap()); s.push(self.cs.next().unwrap()); while let Some(ch)=self.cs.peek(){ if ch.is_ascii_hexdigit()||ch=='_'{ s.push(ch); self.cs.next(); } else { break; } } s.push_str(&self.read_suffix()); return (s,false); }
+            if matches!(a1,Some('b')|Some('B')){ s.push(self.cs.next().unwrap()); s.push(self.cs.next().unwrap()); while let Some(ch)=self.cs.peek(){ if ch=='0'||ch=='1'||ch=='_'{ s.push(ch); self.cs.next(); } else { break; } } s.push_str(&self.read_suffix()); return (s,false); }
+            if matches!(a1,Some('o')|Some('O')){ s.push(self.cs.next().unwrap()); s.push(self.cs.next().unwrap()); while let Some(ch)=self.cs.peek(){ if ('0'..='7').contains(&ch)||ch=='_'{ s.push(ch); self.cs.next(); } else { break; } } s.push_str(&self.read_suffix()); return (s,false); }
         }
         let mut seen_dot=false; let mut seen_exp=false;
         while let Some(ch)=self.cs.peek(){
-            if ch.is_ascii_digit()||ch=='_'{ s.push(ch); self.next(); }
-            else if ch=='.' && !seen_dot && !seen_exp { is_float=true; seen_dot=true; s.push(ch); self.next(); }
+            if ch.is_ascii_digit()||ch=='_'{ s.push(ch); self.cs.next(); }
+            else if ch=='.' && !seen_dot && !seen_exp { is_float=true; seen_dot=true; s.push(ch); self.cs.next(); }
             else if (ch=='e'||ch=='E') && !seen_exp {
                 let sign=self.cs.peek_ahead(1);
                 let d=self.cs.peek_ahead(if matches!(sign,Some('+')|Some('-')){2}else{1});
                 if d.map(|c|c.is_ascii_digit()).unwrap_or(false){
-                    is_float=true; seen_exp=true; s.push(ch); self.next();
-                    if let Some(sig)=self.cs.peek(){ if sig=='+'||sig=='-' { s.push(sig); self.next(); } }
+                    is_float=true; seen_exp=true; s.push(ch); self.cs.next();
+                    if let Some(sig)=self.cs.peek(){ if sig=='+'||sig=='-' { s.push(sig); self.cs.next(); } }
                 } else { break; }
             } else { break; }
         }
@@ -133,7 +131,7 @@ impl Scanner {
     fn read_suffix(&mut self)->String{
         let mut suf=String::new();
         for _ in 0..2{
-            if let Some(ch)=self.cs.peek(){ if matches!(ch,'u'|'U'|'l'|'L'|'f'|'F'){ suf.push(ch); self.next(); continue; } }
+            if let Some(ch)=self.cs.peek(){ if matches!(ch,'u'|'U'|'l'|'L'|'f'|'F'){ suf.push(ch); self.cs.next(); continue; } }
             break;
         }
         suf
@@ -142,10 +140,27 @@ impl Scanner {
         let mut s=String::new(); let first=self.cs.next().unwrap(); s.push(first);
         if let Some(next)=self.cs.peek(){
             let two=format!("{}{}",first,next);
-            if ["==","!=",">=","<=","&&","||","<<",">>","+=","-=","*=","/=","%=","&=","|=","^=","->","::"].contains(&two.as_str()){
-                self.next(); s.push(next); return s;
+            if ["==","!=",">=","<=","&&","||","<<",">>","+=","-=","*=","/=","%=","&=","|=","^=","->","::","="].contains(&two.as_str()){
+                self.cs.next(); s.push(next); return s;
             }
         }
         s
+    }
+
+    pub fn token_stats(&self)->HashMap<&'static str,usize>{
+        let mut map:HashMap<&'static str,usize>=HashMap::new();
+        for t in &self.tokens {
+            let k = match t.kind(){
+                TokenType::Keyword=>"Keyword",TokenType::Identifier=>"Identifier",
+                TokenType::IntConstant=>"IntConstant",TokenType::FloatConstant=>"FloatConstant",
+                TokenType::StringLiteral=>"StringLiteral",TokenType::CharLiteral=>"CharLiteral",
+                TokenType::Operator=>"Operator",TokenType::Punctuation=>"Punctuation",
+                TokenType::Comment=>"Comment",TokenType::Preprocessor=>"Preprocessor",
+                TokenType::Whitespace=>"Whitespace",TokenType::Invalid=>"Invalid",
+                TokenType::None=>"None"
+            };
+            *map.entry(k).or_insert(0)+=1;
+        }
+        map
     }
 }

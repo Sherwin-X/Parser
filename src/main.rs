@@ -1,12 +1,12 @@
-
 mod token; mod cstream; mod scanner; mod parser;
 use scanner::*; use token::*; use parser::*;
 use std::fs::File; use std::io::{Write, Read}; use std::env;
 
-fn html_escape(s:&str)->String{ 
+fn html_escape(s:&str)->String{
     s.chars().map(|c|match c{
         '&'=>"&amp;".into(), '<'=>"&lt;".into(), '>'=>"&gt;".into(),
-        '"'=>"&quot;".into(), '\''=>"&#39;".into(), _=>c.to_string(),
+        '\"'=>"&quot;".into(), '\\'=> "&#39;".into(),
+        _=>c.to_string(),
     }).collect::<Vec<_>>().join("")
 }
 fn css(theme:&str)->String{
@@ -15,7 +15,7 @@ fn css(theme:&str)->String{
         _=>("#0d1117","#e6edf3","#ff7b72","#d2a8ff","#79c0ff","#a5d6ff","#ffa657","#c9d1d9","#8b949e","#b62324","#2f81f7"),
     };
     format!("
-body{{background:{bg};color:{fg};font:14px/1.6 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace; padding:24px;}}
+body{{background:{bg};color:{fg};font:14px/1.6 ui-monospace; padding:24px;}}
 .code{{display:grid; grid-template-columns: auto 1fr; gap: 12px;}}
 .gutter{{user-select:none; color:#6e7681; text-align:right; padding-right:8px;}}
 pre{{white-space:pre-wrap; word-break:break-word; margin:0;}}
@@ -27,13 +27,13 @@ pre{{white-space:pre-wrap; word-break:break-word; margin:0;}}
 ", bg=bg,fg=fg,c_kw=c_kw,c_id=c_id,c_num=c_num,c_str=c_str,c_op=c_op,c_punct=c_punct,c_cmt=c_cmt,c_err=c_err,c_pp=c_pp)
 }
 fn serde_json_escape(s:&str)->String{
-    let mut out=String::with_capacity(s.len()+2); out.push('"');
+    let mut out=String::with_capacity(s.len()+2); out.push('\"');
     for ch in s.chars(){ match ch{
-        '"'=>out.push_str("\\""), '\\'=>out.push_str("\\\\"),
+        '\"'=>out.push_str("\\\""), '\\'=>out.push_str("\\\\"),
         '\n'=>out.push_str("\\n"), '\r'=>out.push_str("\\r"), '\t'=>out.push_str("\\t"),
         c if c.is_control()=>out.push_str(&format!("\\u{:04x}", c as u32)), c=>out.push(c),
     }}
-    out.push('"'); out
+    out.push('\"'); out
 }
 fn main(){
     let args:Vec<String>=env::args().collect();
@@ -59,9 +59,9 @@ fn main(){
     }
     if parse{
         let tokens:Vec<Token>=s.get_token_vec().iter().filter(|t| !matches!(t.kind(), TokenType::Whitespace | TokenType::Comment)).cloned().collect();
-        let mut p=Parser::new(tokens); let ast=p.parse_program();
+        let mut p=parser::Parser::new(tokens); let items=p.parse_items();
         if !p.errors.is_empty(){ eprintln!("Parse errors:"); for e in p.errors{ eprintln!("- {}", e.message); } }
-        println!("{}", stringify_ast(&ast)); return;
+        println!("{}", parser::stringify_items(&items)); return;
     }
     if json_out{
         print!("[");
@@ -69,19 +69,12 @@ fn main(){
         for t in s.get_token_vec(){
             if no_comments && matches!(t.kind(), TokenType::Comment|TokenType::Whitespace){ continue; }
             if !first{ print!(","); } first=false;
-            print!("{{"kind":"{:?}","text":{},"start":{{"line":{},"col":{}}},"end":{{"line":{},"col":{}}}}}",
+            print!("{{\"kind\":\"{:?}\",\"text\":{},\"start\":{{\"line\":{},\"col\":{}}},\"end\":{{\"line\":{},\"col\":{}}}}}",
                 t.kind(), serde_json_escape(t.text()), t.start().line, t.start().col, t.end().line, t.end().col);
         }
         println!("]");
         if !s.diagnostics().is_empty(){ eprintln!("Diagnostics:"); for d in s.diagnostics(){ eprintln!("{}:{} {}", d.start.line, d.start.col, d.message); } }
         return;
-    }
-    if dump{
-        for t in s.get_token_vec(){
-            if no_comments && matches!(t.kind(), TokenType::Comment|TokenType::Whitespace){ continue; }
-            println!("{:?}\t{:?}\t{}:{}", t.kind(), t.text(), t.start().line, t.start().col);
-        }
-        if !s.diagnostics().is_empty(){ eprintln!("Diagnostics:"); for d in s.diagnostics(){ eprintln!("  {}:{}  {}", d.start.line, d.start.col, d.message); } }
     }
     let mut file=File::create(&out).expect("cannot create out.html");
     let head=format!("<!doctype html><html><head><meta charset='utf-8'><title>X Highlighter</title><style>{}</style></head><body><div class='legend'><span class='kw'>kw</span><span class='id'>id</span><span class='num'>num</span><span class='str'>str</span><span class='op'>op</span><span class='punct'>punct</span><span class='cmt'>cmt</span><span class='pp'>pp</span><span class='err'>err</span></div><hr/><div class='code'><pre class='gutter'>", css(&theme));
