@@ -1,8 +1,9 @@
-mod token; mod cstream; mod scanner;
-use scanner::*; use token::*;
+
+mod token; mod cstream; mod scanner; mod parser;
+use scanner::*; use token::*; use parser::*;
 use std::fs::File; use std::io::{Write, Read}; use std::env;
 
-fn html_escape(s:&str)->String{
+fn html_escape(s:&str)->String{ 
     s.chars().map(|c|match c{
         '&'=>"&amp;".into(), '<'=>"&lt;".into(), '>'=>"&gt;".into(),
         '"'=>"&quot;".into(), '\''=>"&#39;".into(), _=>c.to_string(),
@@ -36,16 +37,14 @@ fn serde_json_escape(s:&str)->String{
 }
 fn main(){
     let args:Vec<String>=env::args().collect();
-    let mut input="example1.x".to_string();
-    let mut out="out.html".to_string();
-    let mut theme="dark".to_string();
-    let mut dump=false; let mut no_ws=false; let mut no_comments=false; let mut json_out=false; let mut kw_file:Option<String>=None; let mut stats=false;
+    let mut input="example1.x".to_string(); let mut out="out.html".to_string(); let mut theme="dark".to_string();
+    let mut dump=false; let mut no_ws=false; let mut no_comments=false; let mut json_out=false; let mut stats=false; let mut parse=false; let mut kw_file:Option<String>=None;
     let mut i=1; while i<args.len(){
         match args[i].as_str(){
             "--in" if i+1<args.len()=>{input=args[i+1].clone(); i+=1;}
             "--out" if i+1<args.len()=>{out=args[i+1].clone(); i+=1;}
             "--theme" if i+1<args.len()=>{theme=args[i+1].clone(); i+=1;}
-            "--dump"=>{dump=true;} "--no-ws"=>{no_ws=true;} "--no-comments"=>{no_comments=true;} "--json"=>{json_out=true;} "--stats"=>{stats=true;}
+            "--dump"=>{dump=true;} "--no-ws"=>{no_ws=true;} "--no-comments"=>{no_comments=true;} "--json"=>{json_out=true;} "--stats"=>{stats=true;} "--parse"=>{parse=true;}
             "--kw" if i+1<args.len()=>{kw_file=Some(args[i+1].clone()); i+=1;}
             _=>{}
         } i+=1;
@@ -57,6 +56,12 @@ fn main(){
     s.tokenize();
     if stats{
         let map=s.token_stats(); eprintln!("Token stats:"); let mut v:Vec<_>=map.into_iter().collect(); v.sort_by_key(|(k,_)|k.to_string()); for (k,c) in v{ eprintln!("{:>12}: {}", k, c); }
+    }
+    if parse{
+        let tokens:Vec<Token>=s.get_token_vec().iter().filter(|t| !matches!(t.kind(), TokenType::Whitespace | TokenType::Comment)).cloned().collect();
+        let mut p=Parser::new(tokens); let ast=p.parse_program();
+        if !p.errors.is_empty(){ eprintln!("Parse errors:"); for e in p.errors{ eprintln!("- {}", e.message); } }
+        println!("{}", stringify_ast(&ast)); return;
     }
     if json_out{
         print!("[");
