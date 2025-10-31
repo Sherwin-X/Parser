@@ -1,12 +1,17 @@
 mod token; mod cstream; mod scanner; mod parser;
 use scanner::*; use token::*; use parser::*;
 use std::fs::File; use std::io::{Write, Read}; use std::env;
+use std::process::ExitCode;
 
 fn html_escape(s:&str)->String{
     s.chars().map(|c|match c{
-        '&'=>"&amp;".into(), '<'=>"&lt;".into(), '>'=>"&gt;".into(),
-        '\"'=>"&quot;".into(), '\\'=> "&#39;".into(),
-        _=>c.to_string(),
+        '&' => "&amp;".into(),
+        '<' => "&lt;".into(),
+        '>' => "&gt;".into(),
+        '\"'=> "&quot;".into(),
+        '\''=> "&#39;".into(),
+        '\\' => "&#92;".into(),
+        _ => c.to_string(),
     }).collect::<Vec<_>>().join("")
 }
 fn css(theme:&str)->String{
@@ -15,7 +20,7 @@ fn css(theme:&str)->String{
         _=>("#0d1117","#e6edf3","#ff7b72","#d2a8ff","#79c0ff","#a5d6ff","#ffa657","#c9d1d9","#8b949e","#b62324","#2f81f7"),
     };
     format!("
-body{{background:{bg};color:{fg};font:14px/1.6 ui-monospace; padding:24px;}}
+body{{background:{bg};color:{fg};font:14px/1.6 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace; padding:24px;}}
 .code{{display:grid; grid-template-columns: auto 1fr; gap: 12px;}}
 .gutter{{user-select:none; color:#6e7681; text-align:right; padding-right:8px;}}
 pre{{white-space:pre-wrap; word-break:break-word; margin:0;}}
@@ -29,40 +34,99 @@ pre{{white-space:pre-wrap; word-break:break-word; margin:0;}}
 fn serde_json_escape(s:&str)->String{
     let mut out=String::with_capacity(s.len()+2); out.push('\"');
     for ch in s.chars(){ match ch{
-        '\"'=>out.push_str("\\\""), '\\'=>out.push_str("\\\\"),
-        '\n'=>out.push_str("\\n"), '\r'=>out.push_str("\\r"), '\t'=>out.push_str("\\t"),
-        c if c.is_control()=>out.push_str(&format!("\\u{:04x}", c as u32)), c=>out.push(c),
+        '\"'=>out.push_str("\\\""),
+        '\\'=>out.push_str("\\\\"),
+        '\n'=>out.push_str("\\n"),
+        '\r'=>out.push_str("\\r"),
+        '\t'=>out.push_str("\\t"),
+        c if c.is_control()=>out.push_str(&format!("\\u{:04x}", c as u32)),
+        c=>out.push(c),
     }}
     out.push('\"'); out
 }
-fn main(){
+
+fn main() -> ExitCode {
     let args:Vec<String>=env::args().collect();
-    let mut input="example1.x".to_string(); let mut out="out.html".to_string(); let mut theme="dark".to_string();
-    let mut dump=false; let mut no_ws=false; let mut no_comments=false; let mut json_out=false; let mut stats=false; let mut parse=false; let mut kw_file:Option<String>=None;
+    let mut input="example1.x".to_string();
+    let mut out="out.html".to_string();
+    let mut theme="dark".to_string();
+    let mut dump=false;
+    let mut no_ws=false;
+    let mut no_comments=false;
+    let mut json_out=false;
+    let mut stats=false;
+    let mut parse=false;
+    let mut kw_file:Option<String>=None;
+    let mut fail_on_error=false; // 新增：遇到 Invalid/诊断 非零退出
+
     let mut i=1; while i<args.len(){
         match args[i].as_str(){
             "--in" if i+1<args.len()=>{input=args[i+1].clone(); i+=1;}
             "--out" if i+1<args.len()=>{out=args[i+1].clone(); i+=1;}
             "--theme" if i+1<args.len()=>{theme=args[i+1].clone(); i+=1;}
-            "--dump"=>{dump=true;} "--no-ws"=>{no_ws=true;} "--no-comments"=>{no_comments=true;} "--json"=>{json_out=true;} "--stats"=>{stats=true;} "--parse"=>{parse=true;}
+            "--dump"=>{dump=true;}
+            "--no-ws"=>{no_ws=true;}
+            "--no-comments"=>{no_comments=true;}
+            "--json"=>{json_out=true;}
+            "--stats"=>{stats=true;}
+            "--parse"=>{parse=true;}
             "--kw" if i+1<args.len()=>{kw_file=Some(args[i+1].clone()); i+=1;}
+            "--fail-on-error"=>{fail_on_error=true;}
             _=>{}
         } i+=1;
     }
+
     let mut s=Scanner::new(&input);
+
     if let Some(path)=kw_file{
-        let mut buf=String::new(); if let Ok(mut f)=File::open(&path){ let _=f.read_to_string(&mut buf); let kws=buf.split_whitespace().map(|w|w.to_string()).collect::<Vec<_>>(); if !kws.is_empty(){ s.set_keywords(kws); } }
+        let mut buf=String::new();
+        if let Ok(mut f)=File::open(&path){
+            let _=f.read_to_string(&mut buf);
+            let kws=buf.split_whitespace().map(|w|w.to_string()).collect::<Vec<_>>();
+            if !kws.is_empty(){ s.set_keywords(kws); }
+        }
     }
+
     s.tokenize();
+
     if stats{
-        let map=s.token_stats(); eprintln!("Token stats:"); let mut v:Vec<_>=map.into_iter().collect(); v.sort_by_key(|(k,_)|k.to_string()); for (k,c) in v{ eprintln!("{:>12}: {}", k, c); }
+        let map=s.token_stats();
+        eprintln!("Token stats:");
+        let mut v:Vec<_>=map.into_iter().collect();
+        v.sort_by_key(|(k,_)|k.to_string());
+        for (k,c) in v{ eprintln!("{:>12}: {}", k, c); }
     }
+
+    // 收集错误情况
+    let mut has_invalid=false;
+    for t in s.get_token_vec(){
+        if matches!(t.kind(), TokenType::Invalid){ has_invalid=true; break; }
+    }
+    let has_diag = !s.diagnostics().is_empty();
+
     if parse{
-        let tokens:Vec<Token>=s.get_token_vec().iter().filter(|t| !matches!(t.kind(), TokenType::Whitespace | TokenType::Comment)).cloned().collect();
-        let mut p=parser::Parser::new(tokens); let items=p.parse_items();
-        if !p.errors.is_empty(){ eprintln!("Parse errors:"); for e in p.errors{ eprintln!("- {}", e.message); } }
-        println!("{}", parser::stringify_items(&items)); return;
+        let tokens:Vec<Token>=s.get_token_vec()
+            .iter()
+            .filter(|t| !matches!(t.kind(), TokenType::Whitespace | TokenType::Comment))
+            .cloned()
+            .collect();
+        let mut p=parser::Parser::new(tokens);
+        let items=p.parse_items();
+        if !p.errors.is_empty(){
+            eprintln!("Parse errors:");
+            for e in p.errors{ eprintln!("- {}", e.message); }
+        }
+        println!("{}", parser::stringify_items(&items));
+        if fail_on_error && (has_invalid || has_diag) {
+            if has_diag {
+                eprintln!("Diagnostics:");
+                for d in s.diagnostics(){ eprintln!("{}:{} {}", d.start.line, d.start.col, d.message); }
+            }
+            return ExitCode::from(1);
+        }
+        return ExitCode::SUCCESS;
     }
+
     if json_out{
         print!("[");
         let mut first=true;
@@ -73,31 +137,52 @@ fn main(){
                 t.kind(), serde_json_escape(t.text()), t.start().line, t.start().col, t.end().line, t.end().col);
         }
         println!("]");
-        if !s.diagnostics().is_empty(){ eprintln!("Diagnostics:"); for d in s.diagnostics(){ eprintln!("{}:{} {}", d.start.line, d.start.col, d.message); } }
-        return;
+        if has_diag {
+            eprintln!("Diagnostics:");
+            for d in s.diagnostics(){ eprintln!("{}:{} {}", d.start.line, d.start.col, d.message); }
+        }
+        if fail_on_error && (has_invalid || has_diag) { return ExitCode::from(1); }
+        return ExitCode::SUCCESS;
     }
+
+    // HTML 高亮输出
     let mut file=File::create(&out).expect("cannot create out.html");
-    let head=format!("<!doctype html><html><head><meta charset='utf-8'><title>X Highlighter</title><style>{}</style></head><body><div class='legend'><span class='kw'>kw</span><span class='id'>id</span><span class='num'>num</span><span class='str'>str</span><span class='op'>op</span><span class='punct'>punct</span><span class='cmt'>cmt</span><span class='pp'>pp</span><span class='err'>err</span></div><hr/><div class='code'><pre class='gutter'>", css(&theme));
+    let head=format!(
+        "<!doctype html><html><head><meta charset='utf-8'><title>X Highlighter</title><style>{}</style></head><body><div class='legend'><span class='kw'>kw</span><span class='id'>id</span><span class='num'>num</span><span class='str'>str</span><span class='op'>op</span><span class='punct'>punct</span><span class='cmt'>cmt</span><span class='pp'>pp</span><span class='err'>err</span></div><hr/><div class='code'><pre class='gutter'>",
+        css(&theme)
+    );
     file.write_all(head.as_bytes()).unwrap();
-    let max_line=s.get_token_vec().iter().filter(|t| !(no_comments && matches!(t.kind(), TokenType::Comment))).map(|t|t.start().line).max().unwrap_or(1);
+
+    let max_line=s.get_token_vec()
+        .iter()
+        .filter(|t| !(no_comments && matches!(t.kind(), TokenType::Comment)))
+        .map(|t| t.start().line)
+        .max()
+        .unwrap_or(1);
     for i in 1..=max_line{ file.write_all(format!("{:>4}\n", i).as_bytes()).unwrap(); }
     file.write_all(b"</pre>\n<pre>\n").unwrap();
+
     for t in s.get_token_vec(){
         if no_comments && matches!(t.kind(), TokenType::Comment){ continue; }
-        let cls=t.css_class(); let txt=html_escape(t.text());
+        let cls=t.css_class();
+        let txt=html_escape(t.text());
         if matches!(t.kind(), TokenType::Whitespace){
-            if no_ws{ file.write_all(txt.replace('\n',"\n").as_bytes()).unwrap(); } else { file.write_all(txt.as_bytes()).unwrap(); }
+            file.write_all(txt.as_bytes()).unwrap();
         } else {
             file.write_all(format!("<span class='{}' title='{}:{}'>{}</span>", cls, t.start().line, t.start().col, txt).as_bytes()).unwrap();
         }
     }
     file.write_all(b"\n</pre>\n</div>\n").unwrap();
-    if !s.diagnostics().is_empty(){
+
+    if has_diag {
         file.write_all(b"<div class='diag'>\n").unwrap();
         file.write_all(format!("<div><b>Diagnostics ({}):</b></div>\n", s.diagnostics().len()).as_bytes()).unwrap();
         for d in s.diagnostics(){ file.write_all(format!("<div class='item'>{}:{} — {}</div>\n", d.start.line, d.start.col, html_escape(&d.message)).as_bytes()).unwrap(); }
         file.write_all(b"</div>\n").unwrap();
     }
     file.write_all(b"</body></html>\n").unwrap();
+
     println!("Wrote {}", out);
+    if fail_on_error && (has_invalid || has_diag) { return ExitCode::from(1); }
+    ExitCode::SUCCESS
 }
