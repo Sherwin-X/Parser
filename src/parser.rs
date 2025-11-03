@@ -11,7 +11,14 @@ pub enum Expr {
     Unary  { op: String, expr: Box<Expr> },
     Call   { callee: String, args: Vec<Expr> },
     Assign { op: String, lhs: Box<Expr>, rhs: Box<Expr> },
-    Ternary { cond: Box<Expr>, then_e: Box<Expr>, else_e: Box<Expr> }, // 新增 ?: 三目
+    Ternary { cond: Box<Expr>, then_e: Box<Expr>, else_e: Box<Expr> },
+    // 新增
+    PostInc(Box<Expr>),
+    PostDec(Box<Expr>),
+    Index  { base: Box<Expr>, index: Box<Expr> },
+    Member { base: Box<Expr>, field: String },     // a.b
+    PtrMember { base: Box<Expr>, field: String },  // a->b
+    Comma(Vec<Expr>), // e1, e2, e3 ；取最后一个值
 }
 
 #[derive(Debug, Clone)]
@@ -20,12 +27,11 @@ pub struct Param { pub ty: String, pub name: String }
 #[derive(Debug, Clone)]
 pub enum Stmt {
     VarDecl { ty: String, name: String, init: Option<Expr> },
-    // 为兼容多声明：int a=1,b=2; 解析为 Block([VarDecl(...), VarDecl(...)]), 避免大改 AST
     Return(Option<Expr>),
     If     { cond: Expr, then_branch: Box<Stmt>, else_branch: Option<Box<Stmt>> },
     While  { cond: Expr, body: Box<Stmt> },
     For    { init: Option<Box<Stmt>>, cond: Option<Expr>, step: Option<Expr>, body: Box<Stmt> },
-    Switch { expr: Expr, cases: Vec<Case> }, // 新增 switch/case
+    Switch { expr: Expr, cases: Vec<Case> },
     Break,
     Continue,
     ExprStmt(Expr),
@@ -60,11 +66,12 @@ impl Parser {
     fn cur_is_punct(&self, ch: &str)->bool{ self.cur().map(|t| matches!(t.kind(), TokenType::Punctuation) && t.text()==ch).unwrap_or(false) }
     fn cur_is_op(&self, op: &str)->bool{ self.cur().map(|t| matches!(t.kind(), TokenType::Operator) && t.text()==op).unwrap_or(false) }
     fn bump(&mut self)->Option<Token>{ if self.at_end(){None}else{ let t=self.tokens[self.i].clone(); self.i+=1; Some(t) } }
-    fn expect_punct(&mut self, ch: &str){ if !self.cur_is_punct(ch){ self.error(format!("expected '{}' {}", ch, self.here())); } else { self.bump(); } }
-    fn expect_kw(&mut self, kw: &str){ if !self.cur_is_kw(kw){ self.error(format!("expected keyword '{}' {}", kw, self.here())); } else { self.bump(); } }
-    fn here(&self)->String{ format!("@{}", self.i) }
+    fn expect_punct(&mut self, ch: &str){ if !self.cur_is_punct(ch){ self.error(format!("expected '{}'", ch)); } else { self.bump(); } }
+    fn expect_kw(&mut self, kw: &str){ if !self.cur_is_kw(kw){ self.error(format!("expected keyword '{}'", kw)); } else { self.bump(); } }
     fn error(&mut self, msg: String){ self.errors.push(ParseError{ message: msg, at: self.i }); self.sync(); }
     fn sync(&mut self){ while !self.at_end() { if self.cur_is_punct(";") || self.cur_is_punct("}") { return; } self.i += 1; } }
+
+    /* ---------- 顶层 ---------- */
 
     pub fn parse_items(&mut self) -> Vec<Item> {
         let mut items = vec![];
@@ -75,47 +82,35 @@ impl Parser {
                 // 可能是函数或全局变量声明
                 let ty = self.bump().unwrap().text().to_string();
                 if self.cur_is(&TokenType::Identifier) {
-                    // 试探函数：标识符 + '('
                     let name_tok = self.bump().unwrap();
                     let name = name_tok.text().to_string();
                     if self.cur_is_punct("(") {
                         let params = self.parse_params();
                         let body = if self.cur_is_punct("{") {
                             self.parse_block()
-                        } else {
-                            self.error("function must have a body".into());
-                            Stmt::Empty
-                        };
+                        } else { self.error("function must have a body".into()); Stmt::Empty };
                         items.push(Item::Function{ ret: ty, name, params, body });
                     } else {
-                        // 这是变量声明：可能多声明，以 name 已经拿走为首个声明
+                        // 多声明 int a=1,b=2;
                         let mut decls: Vec<(String, Option<Expr>)> = vec![];
-                        // 已取的 name
                         let first_init = if self.cur_is_op("=") { self.bump(); Some(self.parse_expr()) } else { None };
                         decls.push((name, first_init));
-                        // 继续解析逗号分隔
                         while self.cur_is_punct(",") {
-                            self.bump(); // eat ','
+                            self.bump();
                             if self.cur_is(&TokenType::Identifier) {
                                 let nm = self.bump().unwrap().text().to_string();
                                 let init = if self.cur_is_op("=") { self.bump(); Some(self.parse_expr()) } else { None };
                                 decls.push((nm, init));
-                            } else {
-                                self.error("expected identifier after ',' in declaration".into());
-                                break;
-                            }
+                            } else { self.error("expected identifier after ',' in declaration".into()); break; }
                         }
                         self.expect_punct(";");
-                        // 输出为多个 VarDecl，外层用 Block 包装，避免改 AST
                         let mut stmts = vec![];
                         for (nm, init) in decls {
                             stmts.push(Stmt::VarDecl{ ty: ty.clone(), name: nm, init });
                         }
-                        items.push(Item::Global(Stmt::Block(stmts)));
+                        items.push(Item::Global(if stmts.len()==1 { stmts.pop().unwrap() } else { Stmt::Block(stmts) }));
                     }
-                } else {
-                    self.error("expected identifier after type".into());
-                }
+                } else { self.error("expected identifier after type".into()); }
             } else {
                 let s = self.parse_stmt();
                 items.push(Item::Global(s));
@@ -126,9 +121,7 @@ impl Parser {
 
     fn skip_trivia(&mut self){
         while let Some(t)=self.cur() {
-            if matches!(t.kind(), TokenType::Whitespace | TokenType::Comment | TokenType::Preprocessor) {
-                self.i+=1;
-            } else { break; }
+            if matches!(t.kind(), TokenType::Whitespace | TokenType::Comment | TokenType::Preprocessor) { self.i+=1; } else { break; }
         }
     }
 
@@ -139,12 +132,7 @@ impl Parser {
             loop {
                 if !self.peek_type_keyword(){ self.error("expected type in parameter".into()); break; }
                 let ty=self.bump().unwrap().text().to_string();
-                let name= if self.cur_is(&TokenType::Identifier){
-                    self.bump().unwrap().text().to_string()
-                } else {
-                    self.error("expected param name".into());
-                    "_".into()
-                };
+                let name= if self.cur_is(&TokenType::Identifier){ self.bump().unwrap().text().to_string() } else { self.error("expected param name".into()); "_".into() };
                 v.push(Param{ ty, name });
                 if self.cur_is_punct(")"){ break; }
                 self.expect_punct(",");
@@ -153,6 +141,8 @@ impl Parser {
         self.expect_punct(")");
         v
     }
+
+    /* ---------- 语句 ---------- */
 
     fn parse_stmt(&mut self)->Stmt{
         self.skip_trivia();
@@ -163,7 +153,7 @@ impl Parser {
         if self.cur_is_kw("if"){ return self.parse_if(); }
         if self.cur_is_kw("while"){ return self.parse_while(); }
         if self.cur_is_kw("for"){ return self.parse_for(); }
-        if self.cur_is_kw("switch"){ return self.parse_switch(); } // 新增
+        if self.cur_is_kw("switch"){ return self.parse_switch(); }
         if self.cur_is_kw("break"){ self.bump(); self.expect_punct(";"); return Stmt::Break; }
         if self.cur_is_kw("continue"){ self.bump(); self.expect_punct(";"); return Stmt::Continue; }
         if self.cur_is_punct(";"){ self.bump(); return Stmt::Empty; }
@@ -183,41 +173,28 @@ impl Parser {
     }
 
     fn peek_type_keyword(&self)->bool{
-        self.cur_is_kw("int") || self.cur_is_kw("float") || self.cur_is_kw("char") ||
-        self.cur_is_kw("double") || self.cur_is_kw("void")
+        self.cur_is_kw("int") || self.cur_is_kw("float") || self.cur_is_kw("char")
+            || self.cur_is_kw("double") || self.cur_is_kw("void")
     }
 
-    // 语句层的变量声明（支持 a=1,b=2）
     fn parse_var_decl_stmt(&mut self)->Stmt{
         let ty=self.bump().unwrap().text().to_string();
         let mut decls: Vec<(String, Option<Expr>)> = vec![];
-        // 至少一个 name
-        let name= if self.cur_is(&TokenType::Identifier){
-            self.bump().unwrap().text().to_string()
-        } else {
-            self.error("expected identifier".into()); "_err".into()
-        };
+        let name= if self.cur_is(&TokenType::Identifier){ self.bump().unwrap().text().to_string() } else { self.error("expected identifier".into()); "_err".into() };
         let init= if self.cur_is_op("=") { self.bump(); Some(self.parse_expr()) } else { None };
         decls.push((name, init));
-
         while self.cur_is_punct(",") {
             self.bump();
             if self.cur_is(&TokenType::Identifier){
                 let nm = self.bump().unwrap().text().to_string();
                 let ini = if self.cur_is_op("=") { self.bump(); Some(self.parse_expr()) } else { None };
                 decls.push((nm, ini));
-            } else {
-                self.error("expected identifier after ',' in declaration".into());
-                break;
-            }
+            } else { self.error("expected identifier after ',' in declaration".into()); break; }
         }
         self.expect_punct(";");
-        // 与全局处理保持一致：展开成多个 VarDecl 放进 Block
         let mut v = vec![];
-        for (nm, ini) in decls {
-            v.push(Stmt::VarDecl{ ty: ty.clone(), name: nm, init: ini });
-        }
-        if v.len() == 1 { v.pop().unwrap() } else { Stmt::Block(v) }
+        for (nm, ini) in decls { v.push(Stmt::VarDecl{ ty: ty.clone(), name: nm, init: ini }); }
+        if v.len()==1 { v.pop().unwrap() } else { Stmt::Block(v) }
     }
 
     fn parse_return(&mut self)->Stmt{
@@ -227,8 +204,7 @@ impl Parser {
     }
 
     fn parse_if(&mut self)->Stmt{
-        self.expect_kw("if");
-        self.expect_punct("(");
+        self.expect_kw("if"); self.expect_punct("(");
         let cond=self.parse_expr();
         self.expect_punct(")");
         let then_branch=self.parse_stmt();
@@ -237,8 +213,7 @@ impl Parser {
     }
 
     fn parse_while(&mut self)->Stmt{
-        self.expect_kw("while");
-        self.expect_punct("(");
+        self.expect_kw("while"); self.expect_punct("(");
         let cond=self.parse_expr();
         self.expect_punct(")");
         let body=self.parse_stmt();
@@ -246,27 +221,17 @@ impl Parser {
     }
 
     fn parse_for(&mut self)->Stmt{
-        self.expect_kw("for");
-        self.expect_punct("(");
-        let init = if self.cur_is_punct(";"){
-            self.bump(); None
-        } else if self.peek_type_keyword(){
-            Some(Box::new(self.parse_var_decl_stmt()))
-        } else {
-            Some(Box::new(self.parse_expr_stmt()))
-        };
-        let cond = if self.cur_is_punct(";"){
-            self.bump(); None
-        } else {
-            let e=self.parse_expr(); self.expect_punct(";"); Some(e)
-        };
+        self.expect_kw("for"); self.expect_punct("(");
+        let init = if self.cur_is_punct(";"){ self.bump(); None }
+                   else if self.peek_type_keyword(){ Some(Box::new(self.parse_var_decl_stmt())) }
+                   else { Some(Box::new(self.parse_expr_stmt())) };
+        let cond = if self.cur_is_punct(";"){ self.bump(); None } else { let e=self.parse_expr(); self.expect_punct(";"); Some(e) };
         let step = if self.cur_is_punct(")"){ None } else { Some(self.parse_expr()) };
         self.expect_punct(")");
         let body=self.parse_stmt();
         Stmt::For{ init, cond, step, body: Box::new(body) }
     }
 
-    // 新增：switch/case/default
     fn parse_switch(&mut self)->Stmt{
         self.expect_kw("switch");
         self.expect_punct("(");
@@ -283,16 +248,13 @@ impl Parser {
             self.skip_trivia();
             if self.at_end(){ break; }
             if self.cur_is_punct("}") {
-                // 收尾最后一个分支（若有）
                 if has_label {
                     cases.push(Case{ label: cur_label.take(), body: std::mem::take(&mut cur_body) });
                 }
                 self.bump();
                 break;
             }
-
             if self.cur_is_kw("case") || self.cur_is_kw("default") {
-                // 推入上一段
                 if has_label {
                     cases.push(Case{ label: cur_label.take(), body: std::mem::take(&mut cur_body) });
                     has_label = false;
@@ -304,7 +266,6 @@ impl Parser {
                     cur_label = Some(v);
                     has_label = true;
                 } else {
-                    // default
                     self.bump();
                     self.expect_punct(":");
                     cur_label = None;
@@ -312,12 +273,8 @@ impl Parser {
                 }
                 continue;
             }
-
-            // 普通语句，属于当前 case 的 body
-            let st = self.parse_stmt();
-            cur_body.push(st);
+            cur_body.push(self.parse_stmt());
         }
-
         Stmt::Switch{ expr, cases }
     }
 
@@ -325,13 +282,19 @@ impl Parser {
         let e=self.parse_expr(); self.expect_punct(";"); Stmt::ExprStmt(e)
     }
 
-    // -------- 表达式 --------
+    /* ---------- 表达式 ---------- */
 
     pub fn parse_expr(&mut self)->Expr{
-        self.parse_assignment()
+        // 逗号最低优先级，左结合： e1, e2, e3
+        let mut list = vec![ self.parse_assignment() ];
+        while self.cur_is_op(",") {
+            self.bump();
+            list.push(self.parse_assignment());
+        }
+        if list.len()==1 { list.pop().unwrap() } else { Expr::Comma(list) }
     }
 
-    // 赋值最低优先级，右结合
+    // 赋值（右结合），下层是条件表达式
     fn parse_assignment(&mut self)->Expr{
         let lhs = self.parse_conditional();
         if let Some(t)=self.cur(){
@@ -348,31 +311,34 @@ impl Parser {
         lhs
     }
 
-    // 新增：条件表达式（比赋值高一层；右结合）
+    // 条件 ?: 右结合；内部跟随 assignment 级别
     fn parse_conditional(&mut self)->Expr{
         let cond = self.parse_binop(0);
         if self.cur_is_op("?") {
-            self.bump(); // '?'
-            let then_e = self.parse_assignment(); // C 里中间和右边都是 assignment 级别
-            if !self.cur_is_op(":") {
-                self.error("expected ':' in conditional expression".into());
-                return cond;
-            }
-            self.bump(); // ':'
+            self.bump();
+            let then_e = self.parse_assignment();
+            if !self.cur_is_op(":") { self.error("expected ':' in conditional expression".into()); return cond; }
+            self.bump();
             let else_e = self.parse_assignment();
             return Expr::Ternary{ cond: Box::new(cond), then_e: Box::new(then_e), else_e: Box::new(else_e) };
         }
         cond
     }
 
+    // 二元优先级（越大优先级越高）
+    // 参考 C 但做了简化：||(1) &&(2) |(3) ^(4) &(5) == !=(6) < > <= >=(7) << >>(8) +(9) -(9) *(10)/(10)%(10)
     fn precedence(op: &str)->i32{
         match op {
             "||" => 1,
             "&&" => 2,
-            "==" | "!=" => 3,
-            "<" | ">" | "<=" | ">=" => 4,
-            "+" | "-" => 5,
-            "*" | "/" | "%" => 6,
+            "|"  => 3,
+            "^"  => 4,
+            "&"  => 5,
+            "==" | "!=" => 6,
+            "<" | ">" | "<=" | ">=" => 7,
+            "<<" | ">>" => 8,
+            "+" | "-" => 9,
+            "*" | "/" | "%" => 10,
             _ => -1,
         }
     }
@@ -396,6 +362,7 @@ impl Parser {
     }
 
     fn parse_unary(&mut self)->Expr{
+        // 一元 + - !
         if self.cur_is_op("+") || self.cur_is_op("-") || self.cur_is_op("!") {
             let op=self.bump().unwrap().text().to_string();
             let e=self.parse_unary();
@@ -407,6 +374,7 @@ impl Parser {
     fn parse_postfix(&mut self)->Expr{
         let mut e=self.parse_primary();
         loop{
+            // 调用
             if self.cur_is_punct("("){
                 self.bump();
                 let mut args=vec![];
@@ -421,8 +389,47 @@ impl Parser {
                 if let Expr::Ident(name)=e {
                     e=Expr::Call{ callee: name, args };
                 } else {
+                    // 允许对任意表达式调用（例如 (fptr)()），这里简单容忍：把 callee 打平到字符串
+                    // 但为了保持简洁，遇到这种情况给个错误提示
                     self.error("call on non-identifier".into());
                 }
+                continue;
+            }
+            // 下标
+            if self.cur_is_punct("["){
+                self.bump();
+                let idx=self.parse_expr();
+                self.expect_punct("]");
+                e = Expr::Index{ base: Box::new(e), index: Box::new(idx) };
+                continue;
+            }
+            // 成员 .
+            if self.cur_is_op("."){
+                self.bump();
+                if self.cur_is(&TokenType::Identifier){
+                    let field = self.bump().unwrap().text().to_string();
+                    e = Expr::Member{ base: Box::new(e), field };
+                } else { self.error("expected identifier after '.'".into()); }
+                continue;
+            }
+            // 指针成员 ->
+            if self.cur_is_op("->"){
+                self.bump();
+                if self.cur_is(&TokenType::Identifier){
+                    let field = self.bump().unwrap().text().to_string();
+                    e = Expr::PtrMember{ base: Box::new(e), field };
+                } else { self.error("expected identifier after '->'".into()); }
+                continue;
+            }
+            // 后缀 ++ / --
+            if self.cur_is_op("++"){
+                self.bump();
+                e = Expr::PostInc(Box::new(e));
+                continue;
+            }
+            if self.cur_is_op("--"){
+                self.bump();
+                e = Expr::PostDec(Box::new(e));
                 continue;
             }
             break;
@@ -441,6 +448,8 @@ impl Parser {
     }
 }
 
+/* ---------- 打印 ---------- */
+
 pub fn stringify_items(items: &[Item]) -> String {
     fn indent(n:usize)->String{ "  ".repeat(n) }
     fn fmt_expr(e:&Expr, _d:usize, out:&mut String){
@@ -451,6 +460,16 @@ pub fn stringify_items(items: &[Item]) -> String {
             Expr::Call{callee,args} => { out.push_str(callee); out.push('('); for (i,a) in args.iter().enumerate(){ if i>0{out.push_str(", ");} fmt_expr(a,0,out);} out.push(')'); }
             Expr::Assign{op,lhs,rhs} => { out.push('('); fmt_expr(lhs,0,out); out.push_str(&format!(" {} ", op)); fmt_expr(rhs,0,out); out.push(')'); }
             Expr::Ternary{cond,then_e,else_e} => { out.push('('); fmt_expr(cond,0,out); out.push_str(" ? "); fmt_expr(then_e,0,out); out.push_str(" : "); fmt_expr(else_e,0,out); out.push(')'); }
+            Expr::PostInc(x) => { fmt_expr(x,0,out); out.push_str("++"); }
+            Expr::PostDec(x) => { fmt_expr(x,0,out); out.push_str("--"); }
+            Expr::Index{base,index} => { fmt_expr(base,0,out); out.push('['); fmt_expr(index,0,out); out.push(']'); }
+            Expr::Member{base,field} => { fmt_expr(base,0,out); out.push('.'); out.push_str(field); }
+            Expr::PtrMember{base,field} => { fmt_expr(base,0,out); out.push_str("->"); out.push_str(field); }
+            Expr::Comma(list) => {
+                out.push('(');
+                for (i,ee) in list.iter().enumerate(){ if i>0 { out.push_str(", "); } fmt_expr(ee,0,out); }
+                out.push(')');
+            }
         }
     }
     fn fmt_stmt(s:&Stmt, d:usize, out:&mut String){
