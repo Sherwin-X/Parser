@@ -20,20 +20,20 @@ pub enum Expr {
     Comma(Vec<Expr>),
 }
 
-/* ============ 新增/调整的数据结构（更接近 C 的声明） ============ */
+/* ============ C 风格声明增强：指针 + 多维数组 ============ */
 
 #[derive(Debug, Clone)]
 pub struct Param {
-    pub ty: String,         // 基本类型：int/char/float/double/void
-    pub ptr: usize,         // '*' 的数量，例如 **p -> 2
-    pub name: String,       // 形参名
-    // 未来可扩展：数组/函数指针等
+    pub ty: String,          // 基本类型：int/char/float/double/void
+    pub ptr: usize,          // '*' 的数量
+    pub name: String,        // 形参名（允许 "_" 占位）
+    pub array_dims: Vec<Option<String>>, // 多维数组，如 [3][4] 或 [][]（省略用 None）
 }
 
 #[derive(Debug, Clone)]
 pub enum Stmt {
-    // 新增字段 ptr + array_size：支持 int *p; 和 int a[10];
-    VarDecl { ty: String, ptr: usize, name: String, array_size: Option<String>, init: Option<Expr> },
+    // 支持指针与多维数组
+    VarDecl { ty: String, ptr: usize, name: String, array_dims: Vec<Option<String>>, init: Option<Expr> },
     Return(Option<Expr>),
     If     { cond: Expr, then_branch: Box<Stmt>, else_branch: Option<Box<Stmt>> },
     While  { cond: Expr, body: Box<Stmt> },
@@ -54,7 +54,7 @@ pub struct Case {
 
 #[derive(Debug, Clone)]
 pub enum Item {
-    // 新增 ret_ptr：支持指针返回类型 int *f()
+    // 返回类型仍支持指针层数
     Function { ret: String, ret_ptr: usize, name: String, params: Vec<Param>, body: Stmt },
     Global(Stmt),
 }
@@ -87,10 +87,7 @@ impl Parser {
             self.skip_trivia();
             if self.at_end(){ break; }
             if self.peek_type_keyword() {
-                // 可能是函数或全局变量声明
                 let base_ty = self.bump().unwrap().text().to_string();
-
-                // 支持返回类型为指针：int *f(...) { ... }
                 let ret_ptr = self.parse_pointer_stars();
 
                 if self.cur_is(&TokenType::Identifier) {
@@ -98,39 +95,35 @@ impl Parser {
                     let name = name_tok.text().to_string();
 
                     if self.cur_is_punct("(") {
-                        // 函数定义：参数改为支持指针 Param {ty, ptr, name}
                         let params = self.parse_params();
                         let body = if self.cur_is_punct("{") {
                             self.parse_block()
                         } else { self.error("function must have a body".into()); Stmt::Empty };
                         items.push(Item::Function{ ret: base_ty, ret_ptr, name, params, body });
                     } else {
-                        // 全局变量声明，支持：*p、a[10]、a[]
-                        let mut decls: Vec<(usize, String, Option<String>, Option<Expr>)> = vec![];
-                        // 已经拿到的 name 对应的，注意：这个 name 的指针层数应是“就地指针”，不是 ret_ptr
-                        // C 里返回类型指针与声明符的 * 是不同位置，这里 ret_ptr 只用于函数返回。
-                        // 变量声明此处重新解析自身的 stars（已经拿到了 name，上一行没有 stars，这里以 0 为起点）
-                        let array_size = self.parse_optional_array_size();
-                        let init = if self.cur_is_op("=") { self.bump(); Some(self.parse_expr()) } else { None };
-                        decls.push((0, name, array_size, init));
+                        // 全局变量声明：首个声明符（已取到 name）
+                        let first_dims = self.parse_array_dims_multi();
+                        let first_init = if self.cur_is_op("=") { self.bump(); Some(self.parse_expr()) } else { None };
 
-                        // , 后面的每个声明符各自拥有自己的 * 和数组后缀
+                        let mut decls: Vec<(usize, String, Vec<Option<String>>, Option<Expr>)> =
+                            vec![(0, name, first_dims, first_init)];
+
+                        // 继续解析 , 声明符
                         while self.cur_is_punct(",") {
                             self.bump();
-                            let star = self.parse_pointer_stars();
+                            let ptr = self.parse_pointer_stars();
                             if self.cur_is(&TokenType::Identifier) {
                                 let nm = self.bump().unwrap().text().to_string();
-                                let asz = self.parse_optional_array_size();
-                                let ini = if self.cur_is_op("=") { self.bump(); Some(self.parse_expr()) } else { None };
-                                decls.push((star, nm, asz, ini));
+                                let dims = self.parse_array_dims_multi();
+                                let ini  = if self.cur_is_op("=") { self.bump(); Some(self.parse_expr()) } else { None };
+                                decls.push((ptr, nm, dims, ini));
                             } else { self.error("expected identifier after ',' in declaration".into()); break; }
                         }
                         self.expect_punct(";");
 
-                        // 输出 VarDecl；注意：ret_ptr 对变量没意义，忽略
                         let mut stmts = vec![];
-                        for (ptr, nm, asz, ini) in decls {
-                            stmts.push(Stmt::VarDecl{ ty: base_ty.clone(), ptr, name: nm, array_size: asz, init: ini });
+                        for (ptr, nm, dims, ini) in decls {
+                            stmts.push(Stmt::VarDecl{ ty: base_ty.clone(), ptr, name: nm, array_dims: dims, init: ini });
                         }
                         items.push(Item::Global(if stmts.len()==1 { stmts.pop().unwrap() } else { Stmt::Block(stmts) }));
                     }
@@ -153,26 +146,27 @@ impl Parser {
 
     /* ---------- 参数与声明子 ---------- */
 
-    // 解析若干个 '*'，返回数量
     fn parse_pointer_stars(&mut self) -> usize {
         let mut n=0usize;
         while self.cur_is_op("*") { self.bump(); n+=1; }
         n
     }
 
-    // 解析可选的单维数组后缀：'[' (IntConstant)? ']'
-    // 返回 Some("10") / Some("0xFF") / None（无） / Some("")（无尺寸的 []）
-    fn parse_optional_array_size(&mut self) -> Option<String> {
-        if !self.cur_is_punct("[") { return None; }
-        self.bump(); // '['
-        let size_str = if self.cur_is(&TokenType::IntConstant) {
-            Some(self.bump().unwrap().text().to_string())
-        } else {
-            // 允许省略尺寸：int a[];
-            Some(String::new())
-        };
-        self.expect_punct("]");
-        size_str
+    // 解析 0..N 个维度： [ <int-const>? ] ...
+    fn parse_array_dims_multi(&mut self) -> Vec<Option<String>> {
+        let mut dims = Vec::new();
+        while self.cur_is_punct("[") {
+            self.bump(); // '['
+            let dim = if self.cur_is(&TokenType::IntConstant) {
+                Some(self.bump().unwrap().text().to_string())
+            } else {
+                // 允许省略尺寸：[]
+                None
+            };
+            self.expect_punct("]");
+            dims.push(dim);
+        }
+        dims
     }
 
     fn parse_params(&mut self)->Vec<Param>{
@@ -185,11 +179,9 @@ impl Parser {
                 let ptr=self.parse_pointer_stars();
                 let name= if self.cur_is(&TokenType::Identifier){
                     self.bump().unwrap().text().to_string()
-                } else {
-                    // 允许形参无名（如 int*），用占位符
-                    "_".into()
-                };
-                v.push(Param{ ty, ptr, name });
+                } else { "_".into() };
+                let dims = self.parse_array_dims_multi(); // 形参也可有维度（会按 C 规则退化为指针，但这里仅保留语法）
+                v.push(Param{ ty, ptr, name, array_dims: dims });
                 if self.cur_is_punct(")"){ break; }
                 self.expect_punct(",");
             }
@@ -233,35 +225,35 @@ impl Parser {
             || self.cur_is_kw("double") || self.cur_is_kw("void")
     }
 
-    // 语句层的变量声明（支持每个声明符的 * 和单维数组）
     fn parse_var_decl_stmt(&mut self)->Stmt{
         let base_ty=self.bump().unwrap().text().to_string();
 
-        // 可能的第一项：指针星号 + 标识符 + 可选数组 + 可选初始化
+        // 第一项：* name [dims...] (= init)?
         let first_ptr = self.parse_pointer_stars();
         let name= if self.cur_is(&TokenType::Identifier){
             self.bump().unwrap().text().to_string()
         } else { self.error("expected identifier".into()); "_err".into() };
-        let array_size = self.parse_optional_array_size();
+        let first_dims = self.parse_array_dims_multi();
         let init= if self.cur_is_op("=") { self.bump(); Some(self.parse_expr()) } else { None };
 
-        let mut decls: Vec<(usize, String, Option<String>, Option<Expr>)> = vec![(first_ptr, name, array_size, init)];
+        let mut decls: Vec<(usize, String, Vec<Option<String>>, Option<Expr>)> =
+            vec![(first_ptr, name, first_dims, init)];
 
         while self.cur_is_punct(",") {
             self.bump();
             let ptr = self.parse_pointer_stars();
             if self.cur_is(&TokenType::Identifier){
                 let nm = self.bump().unwrap().text().to_string();
-                let asz = self.parse_optional_array_size();
-                let ini = if self.cur_is_op("=") { self.bump(); Some(self.parse_expr()) } else { None };
-                decls.push((ptr, nm, asz, ini));
+                let dims = self.parse_array_dims_multi();
+                let ini  = if self.cur_is_op("=") { self.bump(); Some(self.parse_expr()) } else { None };
+                decls.push((ptr, nm, dims, ini));
             } else { self.error("expected identifier after ',' in declaration".into()); break; }
         }
         self.expect_punct(";");
 
         let mut v = vec![];
-        for (ptr, nm, asz, ini) in decls {
-            v.push(Stmt::VarDecl{ ty: base_ty.clone(), ptr, name: nm, array_size: asz, init: ini });
+        for (ptr, nm, dims, ini) in decls {
+            v.push(Stmt::VarDecl{ ty: base_ty.clone(), ptr, name: nm, array_dims: dims, init: ini });
         }
         if v.len()==1 { v.pop().unwrap() } else { Stmt::Block(v) }
     }
@@ -310,7 +302,7 @@ impl Parser {
 
         let mut cases: Vec<Case> = vec![];
         let mut cur_body: Vec<Stmt> = vec![];
-        let mut cur_label: Option<Expr> = None;
+               let mut cur_label: Option<Expr> = None;
         let mut has_label = false;
 
         loop {
@@ -351,7 +343,7 @@ impl Parser {
         let e=self.parse_expr(); self.expect_punct(";"); Stmt::ExprStmt(e)
     }
 
-    /* ---------- 表达式（保持你已有增强） ---------- */
+    /* ---------- 表达式（沿用你当前增强） ---------- */
 
     pub fn parse_expr(&mut self)->Expr{
         let mut list = vec![ self.parse_assignment() ];
@@ -448,11 +440,7 @@ impl Parser {
                     }
                 }
                 self.expect_punct(")");
-                if let Expr::Ident(name)=e {
-                    e=Expr::Call{ callee: name, args };
-                } else {
-                    self.error("call on non-identifier".into());
-                }
+                if let Expr::Ident(name)=e { e=Expr::Call{ callee: name, args }; } else { self.error("call on non-identifier".into()); }
                 continue;
             }
             if self.cur_is_punct("["){
@@ -501,6 +489,15 @@ impl Parser {
 pub fn stringify_items(items: &[Item]) -> String {
     fn indent(n:usize)->String{ "  ".repeat(n) }
     fn stars(n:usize)->String { "*".repeat(n) }
+    fn fmt_dims(dims:&[Option<String>]) -> String {
+        let mut s = String::new();
+        for d in dims {
+            s.push('[');
+            if let Some(v)=d { s.push_str(v); }
+            s.push(']');
+        }
+        s
+    }
 
     fn fmt_expr(e:&Expr, _d:usize, out:&mut String){
         match e {
@@ -522,20 +519,20 @@ pub fn stringify_items(items: &[Item]) -> String {
             }
         }
     }
-    fn fmt_decl_line(prefix:&str, ty:&str, ptr:usize, name:&str, array_size:&Option<String>, init:&Option<Expr>, d:usize, out:&mut String){
-        out.push_str(&format!("{}{} {}{} {}", indent(d), prefix, ty, if ptr>0 { format!(" {}", stars(ptr)) } else { "".into() }, name));
-        if let Some(sz) = array_size {
-            out.push('[');
-            if !sz.is_empty() { out.push_str(sz); }
-            out.push(']');
-        }
+
+    fn fmt_decl_line(prefix:&str, ty:&str, ptr:usize, name:&str, array_dims:&[Option<String>], init:&Option<Expr>, d:usize, out:&mut String){
+        out.push_str(&format!("{}{} {}{}", indent(d), prefix, ty, if ptr>0 { format!(" {}", stars(ptr)) } else { "".into() }));
+        out.push(' ');
+        out.push_str(name);
+        out.push_str(&fmt_dims(array_dims));
         if let Some(e)=init{ out.push_str(" = "); fmt_expr(e,d,out); }
         out.push('\n');
     }
+
     fn fmt_stmt(s:&Stmt, d:usize, out:&mut String){
         match s {
-            Stmt::VarDecl{ty,ptr,name,array_size,init} => {
-                fmt_decl_line("decl", ty, *ptr, name, array_size, init, d, out);
+            Stmt::VarDecl{ty,ptr,name,array_dims,init} => {
+                fmt_decl_line("decl", ty, *ptr, name, array_dims, init, d, out);
             }
             Stmt::Return(e) => { out.push_str(&format!("{}return", indent(d))); if let Some(e)=e{ out.push(' '); fmt_expr(e,d,out);} out.push('\n'); }
             Stmt::If{cond,then_branch,else_branch} => {
@@ -569,6 +566,7 @@ pub fn stringify_items(items: &[Item]) -> String {
             Stmt::Empty => { out.push_str(&format!("{};\n", indent(d))); }
         }
     }
+
     let mut s=String::new();
     for it in items {
         match it {
@@ -576,7 +574,16 @@ pub fn stringify_items(items: &[Item]) -> String {
                 s.push_str(&format!("fn {}{} {}(", ret, if *ret_ptr>0 { format!(" {}", "*".repeat(*ret_ptr)) } else { "".into() }, name));
                 for (i,p) in params.iter().enumerate(){
                     if i>0{s.push_str(", "); }
-                    s.push_str(&format!("{}{} {}", p.ty, if p.ptr>0 { format!(" {}", "*".repeat(p.ptr)) } else { "".into() }, p.name));
+                    let dims = {
+                        let mut tmp = String::new();
+                        for d in &p.array_dims {
+                            tmp.push('[');
+                            if let Some(v) = d { tmp.push_str(v); }
+                            tmp.push(']');
+                        }
+                        tmp
+                    };
+                    s.push_str(&format!("{}{} {}{}", p.ty, if p.ptr>0 { format!(" {}", "*".repeat(p.ptr)) } else { "".into() }, p.name, dims));
                 }
                 s.push_str(")\n"); fmt_stmt(body,1,&mut s);
             }
