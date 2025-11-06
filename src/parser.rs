@@ -8,12 +8,16 @@ pub enum Expr {
     Char(String),
     Ident(String),
     Binary { op: String, lhs: Box<Expr>, rhs: Box<Expr> },
-    Unary  { op: String, expr: Box<Expr> },
+    Unary  { op: String, expr: Box<Expr> },      // 支持 + - ! ~ & *
     Call   { callee: String, args: Vec<Expr> },
     Assign { op: String, lhs: Box<Expr>, rhs: Box<Expr> },
     Ternary { cond: Box<Expr>, then_e: Box<Expr>, else_e: Box<Expr> },
+    // 后缀与前缀自增自减
     PostInc(Box<Expr>),
     PostDec(Box<Expr>),
+    PreInc(Box<Expr>),                            // 新增：++x
+    PreDec(Box<Expr>),                            // 新增：--x
+    // 成员、下标、逗号表达式
     Index  { base: Box<Expr>, index: Box<Expr> },
     Member { base: Box<Expr>, field: String },
     PtrMember { base: Box<Expr>, field: String },
@@ -160,8 +164,7 @@ impl Parser {
             let dim = if self.cur_is(&TokenType::IntConstant) {
                 Some(self.bump().unwrap().text().to_string())
             } else {
-                // 允许省略尺寸：[]
-                None
+                None // 允许省略尺寸：[]
             };
             self.expect_punct("]");
             dims.push(dim);
@@ -180,7 +183,7 @@ impl Parser {
                 let name= if self.cur_is(&TokenType::Identifier){
                     self.bump().unwrap().text().to_string()
                 } else { "_".into() };
-                let dims = self.parse_array_dims_multi(); // 形参也可有维度（会按 C 规则退化为指针，但这里仅保留语法）
+                let dims = self.parse_array_dims_multi(); // 形参也可有维度
                 v.push(Param{ ty, ptr, name, array_dims: dims });
                 if self.cur_is_punct(")"){ break; }
                 self.expect_punct(",");
@@ -302,7 +305,7 @@ impl Parser {
 
         let mut cases: Vec<Case> = vec![];
         let mut cur_body: Vec<Stmt> = vec![];
-               let mut cur_label: Option<Expr> = None;
+        let mut cur_label: Option<Expr> = None;
         let mut has_label = false;
 
         loop {
@@ -343,9 +346,10 @@ impl Parser {
         let e=self.parse_expr(); self.expect_punct(";"); Stmt::ExprStmt(e)
     }
 
-    /* ---------- 表达式（沿用你当前增强） ---------- */
+    /* ---------- 表达式 ---------- */
 
     pub fn parse_expr(&mut self)->Expr{
+        // 逗号最低优先级
         let mut list = vec![ self.parse_assignment() ];
         while self.cur_is_op(",") {
             self.bump();
@@ -362,7 +366,7 @@ impl Parser {
                 if ["=","+=","-=","*=","/=","%=","&=","|=","^="].contains(&op) {
                     let op_str=op.to_string();
                     self.bump();
-                    let rhs=self.parse_assignment();
+                    let rhs=self.parse_assignment(); // 右结合
                     return Expr::Assign{ op: op_str, lhs: Box::new(lhs), rhs: Box::new(rhs) };
                 }
             }
@@ -383,6 +387,7 @@ impl Parser {
         cond
     }
 
+    // 二元优先级
     fn precedence(op: &str)->i32{
         match op {
             "||" => 1,
@@ -418,7 +423,21 @@ impl Parser {
     }
 
     fn parse_unary(&mut self)->Expr{
-        if self.cur_is_op("+") || self.cur_is_op("-") || self.cur_is_op("!") {
+        // 前缀自增/自减（可链式）：++ -- 在最前
+        if self.cur_is_op("++") {
+            self.bump();
+            let e = self.parse_unary();
+            return Expr::PreInc(Box::new(e));
+        }
+        if self.cur_is_op("--") {
+            self.bump();
+            let e = self.parse_unary();
+            return Expr::PreDec(Box::new(e));
+        }
+        // 其余一元前缀：+ - ! ~ & *
+        if self.cur_is_op("+") || self.cur_is_op("-") || self.cur_is_op("!")
+            || self.cur_is_op("~") || self.cur_is_op("&") || self.cur_is_op("*")
+        {
             let op=self.bump().unwrap().text().to_string();
             let e=self.parse_unary();
             return Expr::Unary{ op, expr: Box::new(e) };
@@ -509,6 +528,8 @@ pub fn stringify_items(items: &[Item]) -> String {
             Expr::Ternary{cond,then_e,else_e} => { out.push('('); fmt_expr(cond,0,out); out.push_str(" ? "); fmt_expr(then_e,0,out); out.push_str(" : "); fmt_expr(else_e,0,out); out.push(')'); }
             Expr::PostInc(x) => { fmt_expr(x,0,out); out.push_str("++"); }
             Expr::PostDec(x) => { fmt_expr(x,0,out); out.push_str("--"); }
+            Expr::PreInc(x)  => { out.push_str("(++ "); fmt_expr(x,0,out); out.push(')'); }
+            Expr::PreDec(x)  => { out.push_str("(-- "); fmt_expr(x,0,out); out.push(')'); }
             Expr::Index{base,index} => { fmt_expr(base,0,out); out.push('['); fmt_expr(index,0,out); out.push(']'); }
             Expr::Member{base,field} => { fmt_expr(base,0,out); out.push('.'); out.push_str(field); }
             Expr::PtrMember{base,field} => { fmt_expr(base,0,out); out.push_str("->"); out.push_str(field); }
