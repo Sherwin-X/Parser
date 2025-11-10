@@ -1,4 +1,7 @@
-use crate::token::{Token, TokenType};
+// parser.rs
+use crate::token::{Token, TokenType, Span};
+
+/* ===================== AST ===================== */
 
 #[derive(Debug, Clone)]
 pub enum Expr {
@@ -22,14 +25,12 @@ pub enum Expr {
     Comma(Vec<Expr>),
 }
 
-/* ============ C 风格声明增强：指针 + 多维数组 ============ */
-
 #[derive(Debug, Clone)]
 pub struct Param {
     pub ty: String,
     pub ptr: usize,
-    pub name: String,                  // 允许 "_" 占位的无名参数
-    pub array_dims: Vec<Option<String>>,
+    pub name: String,                         // 允许 "_" 占位
+    pub array_dims: Vec<Option<String>>,      // 多维数组维度列表
 }
 
 #[derive(Debug, Clone)]
@@ -49,7 +50,7 @@ pub enum Stmt {
 
 #[derive(Debug, Clone)]
 pub struct Case {
-    pub label: Option<Expr>, // None 表示 default
+    pub label: Option<Expr>, // None = default
     pub body: Vec<Stmt>,
 }
 
@@ -59,103 +60,145 @@ pub enum Item {
     Global(Stmt),
 }
 
+/* ===================== 错误结构（带 caret） ===================== */
+
 #[derive(Debug, Clone)]
-pub struct ParseError { pub message: String, pub at: usize }
+pub struct ParseError {
+    pub code: &'static str,
+    pub message: String,
+    pub span: Span,
+    pub line_text: String,
+}
 
-pub struct Parser { tokens: Vec<Token>, i: usize, pub errors: Vec<ParseError> }
+impl ParseError {
+    pub fn render(&self) -> String {
+        let mut caret = String::new();
+        let pos = self.span.col.saturating_sub(1);
+        caret.push_str(&" ".repeat(pos));
+        caret.push_str(&"^".repeat(self.span.len.max(1)));
+        format!(
+"{}: {} at {}:{}\n{}\n{}\n",
+            self.code, self.message, self.span.line, self.span.col, self.line_text, caret
+        )
+    }
+}
 
-/* ===================== 错误帮助函数（新增） ===================== */
+/* ===================== Parser ===================== */
+
+pub struct Parser {
+    tokens: Vec<Token>,
+    i: usize,
+    source: String,         // 保存整段源码用于取行文本
+    pub errors: Vec<ParseError>,
+}
 
 impl Parser {
-    fn tok_desc(&self) -> String {
-        if self.at_end() { "EOF".into() } else {
-            let t = &self.tokens[self.i];
-            format!("'{}' [{:?}]", t.text(), t.kind())
+    pub fn new(tokens: Vec<Token>, source: String) -> Self {
+        Self { tokens, i: 0, source, errors: vec![] }
+    }
+
+    #[inline] fn at_end(&self)->bool{ self.i>=self.tokens.len() }
+    #[inline] fn cur(&self)->Option<&Token>{ self.tokens.get(self.i) }
+    #[inline] fn cur_is(&self, k: &TokenType)->bool{ self.cur().map(|t| t.kind()==k).unwrap_or(false) }
+    #[inline] fn cur_is_kw(&self, kw: &str)->bool{ self.cur().map(|t| matches!(t.kind(), TokenType::Keyword) && t.text()==kw).unwrap_or(false) }
+    #[inline] fn cur_is_punct(&self, ch: &str)->bool{ self.cur().map(|t| matches!(t.kind(), TokenType::Punctuation) && t.text()==ch).unwrap_or(false) }
+    #[inline] fn cur_is_op(&self, op: &str)->bool{ self.cur().map(|t| matches!(t.kind(), TokenType::Operator) && t.text()==op).unwrap_or(false) }
+    fn bump(&mut self)->Option<Token>{ if self.at_end(){None}else{ let t=self.tokens[self.i].clone(); self.i+=1; Some(t) } }
+
+    fn peek_prev_span(&self) -> Span {
+        if self.i > 0 { self.tokens[self.i-1].span() } else { Span{ line:1, col:1, idx:0, len:0 } }
+    }
+    fn cur_span(&self) -> Span {
+        if let Some(t)=self.cur() { t.span() } else { self.peek_prev_span() }
+    }
+
+    fn line_text_at(&self, span: Span) -> String {
+        let bs = self.source.as_bytes();
+        let mut cur = 1usize; let mut start = 0usize;
+        for i in 0..=bs.len() {
+            if i == bs.len() || bs[i] == b'\n' {
+                if cur == span.line { return String::from_utf8_lossy(&bs[start..i]).into_owned(); }
+                cur += 1; start = i + 1;
+            }
         }
+        String::new()
     }
-    fn tok_loc(&self) -> String {
-        // 如果 Token 有行列，可替换为 (line,col)
-        format!("@{}", self.i)
+
+    fn err_push(&mut self, code: &'static str, message: String, span: Span) {
+        let line_text = self.line_text_at(span);
+        self.errors.push(ParseError{ code, message, span, line_text });
     }
+
     fn err_expect(&mut self, expected: &str) {
-        let msg = format!("E1001: expected {}, found {} {}", expected, self.tok_desc(), self.tok_loc());
-        self.errors.push(ParseError{ message: msg, at: self.i });
+        let span = self.cur_span();
+        let got = if self.at_end(){ "EOF".to_string() } else { format!("'{}'", self.tokens[self.i].text()) };
+        self.err_push("E1001", format!("expected {}, found {}", expected, got), span);
         self.sync();
     }
-    fn err_custom(&mut self, code: &str, msg: &str) {
-        let m = format!("{}: {} {}", code, msg, self.tok_loc());
-        self.errors.push(ParseError{ message: m, at: self.i });
+    fn err_custom_here(&mut self, code: &'static str, msg: &str) {
+        let span = self.cur_span();
+        self.err_push(code, msg.to_string(), span);
         self.sync();
+    }
+
+    fn expect_punct(&mut self, ch: &str){
+        if !self.cur_is_punct(ch){ self.err_expect(&format!("'{}'", ch)); } else { self.bump(); }
+    }
+    fn expect_kw(&mut self, kw: &str){
+        if !self.cur_is_kw(kw){ self.err_expect(&format!("keyword '{}'", kw)); } else { self.bump(); }
     }
     fn expect_token_text(&mut self, text: &str) -> bool {
         if self.cur_is_punct(text) || self.cur_is_op(text) || self.cur_is_kw(text) {
             self.bump(); true
-        } else {
-            self.err_expect(&format!("'{}'", text));
-            false
-        }
+        } else { self.err_expect(&format!("'{}'", text)); false }
     }
-}
 
-/* ===================== 词法/通用 ===================== */
-
-impl Parser {
-    pub fn new(tokens: Vec<Token>) -> Self { Self { tokens, i:0, errors: vec![] } }
-
-    fn at_end(&self)->bool{ self.i>=self.tokens.len() }
-    fn cur(&self)->Option<&Token>{ self.tokens.get(self.i) }
-    fn cur_is(&self, k: &TokenType)->bool{ self.cur().map(|t| t.kind()==k).unwrap_or(false) }
-    fn cur_is_kw(&self, kw: &str)->bool{ self.cur().map(|t| matches!(t.kind(), TokenType::Keyword) && t.text()==kw).unwrap_or(false) }
-    fn cur_is_punct(&self, ch: &str)->bool{ self.cur().map(|t| matches!(t.kind(), TokenType::Punctuation) && t.text()==ch).unwrap_or(false) }
-    fn cur_is_op(&self, op: &str)->bool{ self.cur().map(|t| matches!(t.kind(), TokenType::Operator) && t.text()==op).unwrap_or(false) }
-    fn bump(&mut self)->Option<Token>{ if self.at_end(){None}else{ let t=self.tokens[self.i].clone(); self.i+=1; Some(t) } }
-
-    fn expect_punct(&mut self, ch: &str){ if !self.cur_is_punct(ch){ self.err_expect(&format!("'{}'", ch)); } else { self.bump(); } }
-    fn expect_kw(&mut self, kw: &str){ if !self.cur_is_kw(kw){ self.err_expect(&format!("keyword '{}'", kw)); } else { self.bump(); } }
-
-    fn error(&mut self, msg: String){ self.errors.push(ParseError{ message: msg, at: self.i }); self.sync(); }
-
-    // 同步策略：到分号/右花/右括号/逗号/下一 case/default
+    // 同步：到分号/右花/右括/右方/逗号/下一 case/default
     fn sync(&mut self){
         while !self.at_end() {
-            if self.cur_is_punct(";") || self.cur_is_punct("}") || self.cur_is_punct(")") || self.cur_is_punct("]")
-               || self.cur_is_punct(",") || self.cur_is_kw("case") || self.cur_is_kw("default") {
+            if self.cur_is_punct(";") || self.cur_is_punct("}") || self.cur_is_punct(")")
+               || self.cur_is_punct("]") || self.cur_is_punct(",")
+               || self.cur_is_kw("case") || self.cur_is_kw("default") {
                 return;
             }
             self.i += 1;
         }
     }
-}
 
-/* ===================== 顶层 ===================== */
+    fn skip_trivia(&mut self){
+        while let Some(t)=self.cur() {
+            if matches!(t.kind(), TokenType::Whitespace | TokenType::Comment | TokenType::Preprocessor) { self.i+=1; } else { break; }
+        }
+    }
 
-impl Parser {
+    /* ===================== 入口 ===================== */
+
     pub fn parse_items(&mut self) -> Vec<Item> {
         let mut items = vec![];
         while !self.at_end() {
             self.skip_trivia();
             if self.at_end(){ break; }
+
             if self.peek_type_keyword() {
                 let base_ty = self.bump().unwrap().text().to_string();
                 let ret_ptr = self.parse_pointer_stars();
 
                 if self.cur_is(&TokenType::Identifier) {
-                    let name_tok = self.bump().unwrap();
-                    let name = name_tok.text().to_string();
+                    let name = self.bump().unwrap().text().to_string();
 
                     if self.cur_is_punct("(") {
                         let params = self.parse_params();
                         let body = if self.cur_is_punct("{") {
                             self.parse_block()
                         } else {
-                            self.err_custom("E2003", "function must have a body");
+                            self.err_custom_here("E2003", "function must have a body");
                             Stmt::Empty
                         };
                         items.push(Item::Function{ ret: base_ty, ret_ptr, name, params, body });
                     } else {
+                        // 全局变量声明
                         let first_dims = self.parse_array_dims_multi();
                         let first_init = if self.cur_is_op("=") { self.bump(); Some(self.parse_expr()) } else { None };
-
                         let mut decls: Vec<(usize, String, Vec<Option<String>>, Option<Expr>)> =
                             vec![(0, name, first_dims, first_init)];
 
@@ -167,13 +210,9 @@ impl Parser {
                                 let dims = self.parse_array_dims_multi();
                                 let ini  = if self.cur_is_op("=") { self.bump(); Some(self.parse_expr()) } else { None };
                                 decls.push((ptr, nm, dims, ini));
-                            } else { self.err_custom("E2102", "expected identifier after ',' in declaration"); break; }
+                            } else { self.err_custom_here("E2102", "expected identifier after ',' in declaration"); break; }
                         }
-
-                        if !self.expect_token_text(";") {
-                            // 已报告 E1001，附加提示
-                            self.err_custom("E2001", "missing ';' after declaration");
-                        }
+                        if !self.expect_token_text(";"){ self.err_custom_here("E2001", "missing ';' after declaration"); }
 
                         let mut stmts = vec![];
                         for (ptr, nm, dims, ini) in decls {
@@ -182,7 +221,7 @@ impl Parser {
                         items.push(Item::Global(if stmts.len()==1 { stmts.pop().unwrap() } else { Stmt::Block(stmts) }));
                     }
                 } else {
-                    self.err_custom("E2101", "expected identifier after type");
+                    self.err_custom_here("E2101", "expected identifier after type");
                 }
             } else {
                 let s = self.parse_stmt();
@@ -192,75 +231,64 @@ impl Parser {
         items
     }
 
-    fn skip_trivia(&mut self){
-        while let Some(t)=self.cur() {
-            if matches!(t.kind(), TokenType::Whitespace | TokenType::Comment | TokenType::Preprocessor) { self.i+=1; } else { break; }
-        }
+    /* ===================== 辅助 ===================== */
+
+    fn peek_type_keyword(&self)->bool{
+        self.cur_is_kw("int") || self.cur_is_kw("float") || self.cur_is_kw("char")
+            || self.cur_is_kw("double") || self.cur_is_kw("void")
     }
-}
 
-/* ===================== 参数与声明子 ===================== */
-
-impl Parser {
     fn parse_pointer_stars(&mut self) -> usize {
         let mut n=0usize;
         while self.cur_is_op("*") { self.bump(); n+=1; }
         n
     }
 
-    // 0..N 个维度： [ <int-const>? ] ...
+    // [ <int>? ] ... 0..N 维
     fn parse_array_dims_multi(&mut self) -> Vec<Option<String>> {
         let mut dims = Vec::new();
         while self.cur_is_punct("[") {
-            self.bump(); // '['
+            self.bump();
             let dim = if self.cur_is(&TokenType::IntConstant) {
                 Some(self.bump().unwrap().text().to_string())
             } else { None };
-            if !self.cur_is_punct("]") {
-                self.err_custom("E3002", "unterminated array dimension, expected ']'");
-            }
+            if !self.cur_is_punct("]") { self.err_custom_here("E3002","unterminated array dimension, expected ']'"); }
             self.expect_punct("]");
             dims.push(dim);
         }
         dims
     }
 
+    /* ===================== 参数 ===================== */
+
     fn parse_params(&mut self)->Vec<Param>{
         self.expect_punct("(");
         let mut v=vec![];
         if !self.cur_is_punct(")") {
             loop {
-                if !self.peek_type_keyword(){ self.err_custom("E2103", "expected type in parameter"); break; }
+                if !self.peek_type_keyword(){ self.err_custom_here("E2103", "expected type in parameter"); break; }
                 let ty=self.bump().unwrap().text().to_string();
                 let ptr=self.parse_pointer_stars();
-
-                // 允许无名参数：若下一记号是标识符则取名，否则用 "_"
-                let name = if self.cur_is(&TokenType::Identifier) {
+                let name= if self.cur_is(&TokenType::Identifier){
                     self.bump().unwrap().text().to_string()
                 } else { "_".into() };
-
                 let dims = self.parse_array_dims_multi();
                 v.push(Param{ ty, ptr, name, array_dims: dims });
 
                 if self.cur_is_punct(")") { break; }
                 if !self.expect_token_text(",") {
-                    // 已报缺少 ',', 试图继续同步到 ')'
-                    if !self.cur_is_punct(")") { self.err_custom("E2005", "missing ',' between parameters"); }
+                    if !self.cur_is_punct(")") { self.err_custom_here("E2005","missing ',' between parameters"); }
                     break;
                 }
             }
         }
-        if !self.cur_is_punct(")") {
-            self.err_custom("E3001", "unclosed parameter list, expected ')'");
-        }
+        if !self.cur_is_punct(")") { self.err_custom_here("E3001", "unclosed parameter list, expected ')'"); }
         self.expect_punct(")");
         v
     }
-}
 
-/* ===================== 语句 ===================== */
+    /* ===================== 语句 ===================== */
 
-impl Parser {
     fn parse_stmt(&mut self)->Stmt{
         self.skip_trivia();
         if self.at_end(){ return Stmt::Empty; }
@@ -271,8 +299,8 @@ impl Parser {
         if self.cur_is_kw("while"){ return self.parse_while(); }
         if self.cur_is_kw("for"){ return self.parse_for(); }
         if self.cur_is_kw("switch"){ return self.parse_switch(); }
-        if self.cur_is_kw("break"){ self.bump(); if !self.expect_token_text(";"){ self.err_custom("E2002","missing ';' after 'break'"); } return Stmt::Break; }
-        if self.cur_is_kw("continue"){ self.bump(); if !self.expect_token_text(";"){ self.err_custom("E2002","missing ';' after 'continue'"); } return Stmt::Continue; }
+        if self.cur_is_kw("break"){ self.bump(); if !self.expect_token_text(";"){ self.err_custom_here("E2002","missing ';' after 'break'"); } return Stmt::Break; }
+        if self.cur_is_kw("continue"){ self.bump(); if !self.expect_token_text(";"){ self.err_custom_here("E2002","missing ';' after 'continue'"); } return Stmt::Continue; }
         if self.cur_is_punct(";"){ self.bump(); return Stmt::Empty; }
         self.parse_expr_stmt()
     }
@@ -282,16 +310,11 @@ impl Parser {
         let mut v=vec![];
         loop{
             self.skip_trivia();
-            if self.at_end(){ self.err_custom("E3003", "unclosed block, expected '}' before EOF"); break; }
+            if self.at_end(){ self.err_custom_here("E3003", "unclosed block, expected '}' before EOF"); break; }
             if self.cur_is_punct("}"){ self.bump(); break; }
             v.push(self.parse_stmt());
         }
         Stmt::Block(v)
-    }
-
-    fn peek_type_keyword(&self)->bool{
-        self.cur_is_kw("int") || self.cur_is_kw("float") || self.cur_is_kw("char")
-            || self.cur_is_kw("double") || self.cur_is_kw("void")
     }
 
     fn parse_var_decl_stmt(&mut self)->Stmt{
@@ -300,7 +323,7 @@ impl Parser {
         let first_ptr = self.parse_pointer_stars();
         let name= if self.cur_is(&TokenType::Identifier){
             self.bump().unwrap().text().to_string()
-        } else { self.err_custom("E2104", "expected identifier in declaration"); "_err".into() };
+        } else { self.err_custom_here("E2104", "expected identifier in declaration"); "_err".into() };
         let first_dims = self.parse_array_dims_multi();
         let init= if self.cur_is_op("=") { self.bump(); Some(self.parse_expr()) } else { None };
 
@@ -315,12 +338,10 @@ impl Parser {
                 let dims = self.parse_array_dims_multi();
                 let ini  = if self.cur_is_op("=") { self.bump(); Some(self.parse_expr()) } else { None };
                 decls.push((ptr, nm, dims, ini));
-            } else { self.err_custom("E2102", "expected identifier after ',' in declaration"); break; }
+            } else { self.err_custom_here("E2102", "expected identifier after ',' in declaration"); break; }
         }
 
-        if !self.expect_token_text(";") {
-            self.err_custom("E2001", "missing ';' after declaration");
-        }
+        if !self.expect_token_text(";") { self.err_custom_here("E2001", "missing ';' after declaration"); }
 
         let mut v = vec![];
         for (ptr, nm, dims, ini) in decls {
@@ -333,15 +354,15 @@ impl Parser {
         self.expect_kw("return");
         if self.cur_is_punct(";"){ self.bump(); return Stmt::Return(None); }
         let e=self.parse_expr();
-        if !self.expect_token_text(";") { self.err_custom("E2002", "missing ';' after return value"); }
+        if !self.expect_token_text(";") { self.err_custom_here("E2002", "missing ';' after return value"); }
         Stmt::Return(Some(e))
     }
 
     fn parse_if(&mut self)->Stmt{
         self.expect_kw("if");
-        if !self.expect_token_text("(") { self.err_custom("E3004","missing '(' after 'if'"); }
+        if !self.expect_token_text("(") { self.err_custom_here("E3004","missing '(' after 'if'"); }
         let cond=self.parse_expr();
-        if !self.expect_token_text(")") { self.err_custom("E3001","unclosed condition, expected ')'"); }
+        if !self.expect_token_text(")") { self.err_custom_here("E3001","unclosed condition, expected ')'"); }
         let then_branch=self.parse_stmt();
         let else_branch= if self.cur_is_kw("else"){ self.bump(); Some(Box::new(self.parse_stmt())) } else { None };
         Stmt::If{ cond, then_branch: Box::new(then_branch), else_branch }
@@ -349,16 +370,16 @@ impl Parser {
 
     fn parse_while(&mut self)->Stmt{
         self.expect_kw("while");
-        if !self.expect_token_text("(") { self.err_custom("E3004","missing '(' after 'while'"); }
+        if !self.expect_token_text("(") { self.err_custom_here("E3004","missing '(' after 'while'"); }
         let cond=self.parse_expr();
-        if !self.expect_token_text(")") { self.err_custom("E3001","unclosed condition, expected ')'"); }
+        if !self.expect_token_text(")") { self.err_custom_here("E3001","unclosed condition, expected ')'"); }
         let body=self.parse_stmt();
         Stmt::While{ cond, body: Box::new(body) }
     }
 
     fn parse_for(&mut self)->Stmt{
         self.expect_kw("for");
-        if !self.expect_token_text("(") { self.err_custom("E3004","missing '(' after 'for'"); }
+        if !self.expect_token_text("(") { self.err_custom_here("E3004","missing '(' after 'for'"); }
 
         let init = if self.cur_is_punct(";"){
             self.bump(); None
@@ -372,23 +393,23 @@ impl Parser {
             self.bump(); None
         } else {
             let e=self.parse_expr();
-            if !self.expect_token_text(";") { self.err_custom("E2006","missing ';' in for-header after condition"); }
+            if !self.expect_token_text(";") { self.err_custom_here("E2006","missing ';' in for-header after condition"); }
             Some(e)
         };
 
         let step = if self.cur_is_punct(")"){ None } else { Some(self.parse_expr()) };
 
-        if !self.expect_token_text(")") { self.err_custom("E3001","unclosed for-header, expected ')'"); }
+        if !self.expect_token_text(")") { self.err_custom_here("E3001","unclosed for-header, expected ')'"); }
         let body=self.parse_stmt();
         Stmt::For{ init, cond, step, body: Box::new(body) }
     }
 
     fn parse_switch(&mut self)->Stmt{
         self.expect_kw("switch");
-        if !self.expect_token_text("(") { self.err_custom("E3004","missing '(' after 'switch'"); }
+        if !self.expect_token_text("(") { self.err_custom_here("E3004","missing '(' after 'switch'"); }
         let expr = self.parse_expr();
-        if !self.expect_token_text(")") { self.err_custom("E3001","unclosed condition, expected ')'"); }
-        if !self.cur_is_punct("{") { self.err_custom("E3005","missing '{' to start switch-body"); }
+        if !self.expect_token_text(")") { self.err_custom_here("E3001","unclosed condition, expected ')'"); }
+        if !self.cur_is_punct("{") { self.err_custom_here("E3005","missing '{' to start switch-body"); }
         self.expect_punct("{");
 
         let mut cases: Vec<Case> = vec![];
@@ -398,7 +419,7 @@ impl Parser {
 
         loop {
             self.skip_trivia();
-            if self.at_end(){ self.err_custom("E3003", "unclosed switch, expected '}' before EOF"); break; }
+            if self.at_end(){ self.err_custom_here("E3003", "unclosed switch, expected '}' before EOF"); break; }
             if self.cur_is_punct("}") {
                 if has_label {
                     cases.push(Case{ label: cur_label.take(), body: std::mem::take(&mut cur_body) });
@@ -414,12 +435,12 @@ impl Parser {
                 if self.cur_is_kw("case") {
                     self.bump();
                     let v = self.parse_expr();
-                    if !self.expect_token_text(":") { self.err_custom("E2007","missing ':' after case label"); }
+                    if !self.expect_token_text(":") { self.err_custom_here("E2007","missing ':' after case label"); }
                     cur_label = Some(v);
                     has_label = true;
                 } else {
                     self.bump();
-                    if !self.expect_token_text(":") { self.err_custom("E2007","missing ':' after default"); }
+                    if !self.expect_token_text(":") { self.err_custom_here("E2007","missing ':' after default"); }
                     cur_label = None;
                     has_label = true;
                 }
@@ -432,14 +453,12 @@ impl Parser {
 
     fn parse_expr_stmt(&mut self)->Stmt{
         let e=self.parse_expr();
-        if !self.expect_token_text(";") { self.err_custom("E2002", "missing ';' after expression"); }
+        if !self.expect_token_text(";") { self.err_custom_here("E2002", "missing ';' after expression"); }
         Stmt::ExprStmt(e)
     }
-}
 
-/* ===================== 表达式 ===================== */
+    /* ===================== 表达式 ===================== */
 
-impl Parser {
     pub fn parse_expr(&mut self)->Expr{
         let mut list = vec![ self.parse_assignment() ];
         while self.cur_is_op(",") {
@@ -457,7 +476,7 @@ impl Parser {
                 if ["=","+=","-=","*=","/=","%=","&=","|=","^="].contains(&op) {
                     let op_str=op.to_string();
                     self.bump();
-                    let rhs=self.parse_assignment();
+                    let rhs=self.parse_assignment(); // 右结合
                     return Expr::Assign{ op: op_str, lhs: Box::new(lhs), rhs: Box::new(rhs) };
                 }
             }
@@ -470,7 +489,7 @@ impl Parser {
         if self.cur_is_op("?") {
             self.bump();
             let then_e = self.parse_assignment();
-            if !self.expect_token_text(":") { self.err_custom("E2008","missing ':' in conditional expression"); }
+            if !self.expect_token_text(":") { self.err_custom_here("E2008","missing ':' in conditional expression"); }
             let else_e = self.parse_assignment();
             return Expr::Ternary{ cond: Box::new(cond), then_e: Box::new(then_e), else_e: Box::new(else_e) };
         }
@@ -530,18 +549,18 @@ impl Parser {
                     loop {
                         args.push(self.parse_expr());
                         if self.cur_is_punct(")") { break; }
-                        if !self.expect_token_text(",") { self.err_custom("E2009","missing ',' between call arguments"); break; }
+                        if !self.expect_token_text(",") { self.err_custom_here("E2009","missing ',' between call arguments"); break; }
                     }
                 }
-                if !self.cur_is_punct(")") { self.err_custom("E3001","unclosed argument list, expected ')'"); }
+                if !self.cur_is_punct(")") { self.err_custom_here("E3001","unclosed argument list, expected ')'"); }
                 self.expect_punct(")");
-                if let Expr::Ident(name)=e { e=Expr::Call{ callee: name, args }; } else { self.err_custom("E2201","call on non-identifier"); }
+                if let Expr::Ident(name)=e { e=Expr::Call{ callee: name, args }; } else { self.err_custom_here("E2201","call on non-identifier"); }
                 continue;
             }
             if self.cur_is_punct("["){
                 self.bump();
                 let idx=self.parse_expr();
-                if !self.cur_is_punct("]") { self.err_custom("E3002","unterminated subscript, expected ']'"); }
+                if !self.cur_is_punct("]") { self.err_custom_here("E3002","unterminated subscript, expected ']'"); }
                 self.expect_punct("]");
                 e = Expr::Index{ base: Box::new(e), index: Box::new(idx) };
                 continue;
@@ -551,7 +570,7 @@ impl Parser {
                 if self.cur_is(&TokenType::Identifier){
                     let field = self.bump().unwrap().text().to_string();
                     e = Expr::Member{ base: Box::new(e), field };
-                } else { self.err_custom("E2202","expected identifier after '.'"); }
+                } else { self.err_custom_here("E2202","expected identifier after '.'"); }
                 continue;
             }
             if self.cur_is_op("->"){
@@ -559,7 +578,7 @@ impl Parser {
                 if self.cur_is(&TokenType::Identifier){
                     let field = self.bump().unwrap().text().to_string();
                     e = Expr::PtrMember{ base: Box::new(e), field };
-                } else { self.err_custom("E2203","expected identifier after '->'"); }
+                } else { self.err_custom_here("E2203","expected identifier after '->'"); }
                 continue;
             }
             if self.cur_is_op("++"){ self.bump(); e = Expr::PostInc(Box::new(e)); continue; }
@@ -575,13 +594,13 @@ impl Parser {
         if self.cur_is(&TokenType::StringLiteral){ return Expr::Str(self.bump().unwrap().text().to_string()); }
         if self.cur_is(&TokenType::CharLiteral){ return Expr::Char(self.bump().unwrap().text().to_string()); }
         if self.cur_is(&TokenType::Identifier){ return Expr::Ident(self.bump().unwrap().text().to_string()); }
-        if self.cur_is_punct("("){ self.bump(); let e=self.parse_expr(); if !self.cur_is_punct(")"){ self.err_custom("E3001","unclosed parenthesized expression, expected ')'"); } self.expect_punct(")"); return e; }
-        self.err_custom("E2301", &format!("expected expression, found {}", self.tok_desc()));
+        if self.cur_is_punct("("){ self.bump(); let e=self.parse_expr(); if !self.cur_is_punct(")"){ self.err_custom_here("E3001","unclosed parenthesized expression, expected ')'"); } self.expect_punct(")"); return e; }
+        self.err_custom_here("E2301", "expected expression");
         Expr::Ident("_err".into())
     }
 }
 
-/* ===================== 打印（不变） ===================== */
+/* ===================== 打印器（保持不变，方便调试） ===================== */
 
 pub fn stringify_items(items: &[Item]) -> String {
     fn indent(n:usize)->String{ "  ".repeat(n) }

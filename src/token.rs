@@ -1,23 +1,46 @@
+// token.rs
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Span { pub line: usize, pub col: usize, pub offset: usize }
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum TokenType { None, IntConstant, FloatConstant, StringLiteral, CharLiteral, Operator, Keyword, Identifier, Punctuation, Comment, Preprocessor, Whitespace, Invalid }
-#[derive(Debug, Clone)]
-pub struct Token { text: String, token_type: TokenType, start: Span, end: Span }
-impl Token {
-    pub fn new(text: String, token_type: TokenType, start: Span, end: Span) -> Self { Self { text, token_type, start, end } }
-    pub fn text(&self) -> &str { &self.text }
-    pub fn kind(&self) -> &TokenType { &self.token_type }
-    pub fn start(&self) -> &Span { &self.start }
-    pub fn end(&self) -> &Span { &self.end }
-    pub fn css_class(&self) -> &'static str {
-        match self.token_type {
-            TokenType::Keyword => "kw", TokenType::Identifier => "id",
-            TokenType::IntConstant | TokenType::FloatConstant => "num",
-            TokenType::StringLiteral | TokenType::CharLiteral => "str",
-            TokenType::Operator => "op", TokenType::Punctuation => "punct",
-            TokenType::Comment => "cmt", TokenType::Preprocessor => "pp",
-            TokenType::Whitespace => "ws", TokenType::Invalid => "err", TokenType::None => "tok",
-        }
+pub enum TokenType {
+    Identifier,
+    Keyword,
+    IntConstant,
+    FloatConstant,
+    CharLiteral,
+    StringLiteral,
+    Operator,
+    Punctuation,
+    Whitespace,
+    Comment,
+    Preprocessor,
+    Eof,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Span {
+    pub line: usize,   // 1-based
+    pub col:  usize,   // 1-based
+    pub idx:  usize,   // 起始字节索引
+    pub len:  usize,   // 字节长度（用于 ^^^^ 宽度）
+}
+
+impl Span {
+    pub fn end_col(&self) -> usize {
+        self.col + self.len.saturating_sub(1)
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct Token {
+    kind: TokenType,
+    text: String,
+    span: Span,
+}
+
+impl Token {
+    pub fn new(kind: TokenType, text: impl Into<String>, span: Span) -> Self {
+        Self { kind, text: text.into(), span }
+    }
+    #[inline] pub fn kind(&self) -> TokenType { self.kind }
+    #[inline] pub fn text(&self) -> &str { &self.text }
+    #[inline] pub fn span(&self) -> Span { self.span }
 }
