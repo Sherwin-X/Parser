@@ -185,7 +185,7 @@ impl<'a> Scanner<'a> {
             "int" | "float" | "double" | "char" | "void" |
             "if" | "else" | "for" | "while" | "return" |
             "switch" | "case" | "default" | "break" | "continue" |
-            "sizeof"
+            "sizeof"| "alignof" 
         );
 
         let kind = if kw { TokenType::Keyword } else { TokenType::Identifier };

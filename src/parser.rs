@@ -23,14 +23,28 @@ pub enum Expr {
     Member { base: Box<Expr>, field: String },
     PtrMember { base: Box<Expr>, field: String },
     Comma(Vec<Expr>),
+
+    // === 新增：cast / sizeof / alignof ===
+    Cast { ty: CType, expr: Box<Expr> },
+    SizeofExpr(Box<Expr>),
+    SizeofType(CType),
+    AlignofExpr(Box<Expr>),
+    AlignofType(CType),
+}
+
+// 极简类型：基础类型 + 若干层 *
+#[derive(Debug, Clone)]
+pub struct CType {
+    pub base: String,
+    pub ptr: usize,
 }
 
 #[derive(Debug, Clone)]
 pub struct Param {
     pub ty: String,
     pub ptr: usize,
-    pub name: String,                         // 允许 "_" 占位
-    pub array_dims: Vec<Option<String>>,      // 多维数组维度列表
+    pub name: String,
+    pub array_dims: Vec<Option<String>>,
 }
 
 #[derive(Debug, Clone)]
@@ -88,7 +102,7 @@ impl ParseError {
 pub struct Parser {
     tokens: Vec<Token>,
     i: usize,
-    source: String,         // 保存整段源码用于取行文本
+    source: String,
     pub errors: Vec<ParseError>,
 }
 
@@ -104,6 +118,9 @@ impl Parser {
     #[inline] fn cur_is_punct(&self, ch: &str)->bool{ self.cur().map(|t| matches!(t.kind(), TokenType::Punctuation) && t.text()==ch).unwrap_or(false) }
     #[inline] fn cur_is_op(&self, op: &str)->bool{ self.cur().map(|t| matches!(t.kind(), TokenType::Operator) && t.text()==op).unwrap_or(false) }
     fn bump(&mut self)->Option<Token>{ if self.at_end(){None}else{ let t=self.tokens[self.i].clone(); self.i+=1; Some(t) } }
+
+    fn save(&self)->usize { self.i }
+    fn restore(&mut self, mark: usize) { self.i = mark; }
 
     fn peek_prev_span(&self) -> Span {
         if self.i > 0 { self.tokens[self.i-1].span() } else { Span{ line:1, col:1, idx:0, len:0 } }
@@ -196,7 +213,6 @@ impl Parser {
                         };
                         items.push(Item::Function{ ret: base_ty, ret_ptr, name, params, body });
                     } else {
-                        // 全局变量声明
                         let first_dims = self.parse_array_dims_multi();
                         let first_init = if self.cur_is_op("=") { self.bump(); Some(self.parse_expr()) } else { None };
                         let mut decls: Vec<(usize, String, Vec<Option<String>>, Option<Expr>)> =
@@ -231,7 +247,7 @@ impl Parser {
         items
     }
 
-    /* ===================== 辅助 ===================== */
+    /* ===================== 类型名（极简） ===================== */
 
     fn peek_type_keyword(&self)->bool{
         self.cur_is_kw("int") || self.cur_is_kw("float") || self.cur_is_kw("char")
@@ -242,6 +258,14 @@ impl Parser {
         let mut n=0usize;
         while self.cur_is_op("*") { self.bump(); n+=1; }
         n
+    }
+
+    // 仅支持：<type-kw> <stars>*
+    fn parse_type_name_simple(&mut self) -> Option<CType> {
+        if !self.peek_type_keyword() { return None; }
+        let base = self.bump().unwrap().text().to_string();
+        let ptr  = self.parse_pointer_stars();
+        Some(CType{ base, ptr })
     }
 
     // [ <int>? ] ... 0..N 维
@@ -527,8 +551,52 @@ impl Parser {
     }
 
     fn parse_unary(&mut self)->Expr{
+        // sizeof / alignof —— 两种形式：对类型或对表达式
+        if self.cur_is_kw("sizeof") || self.cur_is_kw("alignof") {
+            let is_align = self.cur_is_kw("alignof");
+            self.bump(); // eat keyword
+            if self.cur_is_punct("(") {
+                let mark = self.save();
+                self.bump(); // '('
+                if let Some(ty) = self.parse_type_name_simple() {
+                    if self.cur_is_punct(")") {
+                        self.bump();
+                        return if is_align {
+                            Expr::AlignofType(ty)
+                        } else {
+                            Expr::SizeofType(ty)
+                        };
+                    }
+                }
+                // 回退：不是 (type) 形式，则当作 '(' expr ')' 的 sizeof/alignof
+                self.restore(mark);
+            }
+            // 一元运算形式：sizeof unary_expr
+            let e = self.parse_unary();
+            return if is_align { Expr::AlignofExpr(Box::new(e)) } else { Expr::SizeofExpr(Box::new(e)) };
+        }
+
+        // 前缀 ++/--
         if self.cur_is_op("++") { self.bump(); let e=self.parse_unary(); return Expr::PreInc(Box::new(e)); }
         if self.cur_is_op("--") { self.bump(); let e=self.parse_unary(); return Expr::PreDec(Box::new(e)); }
+
+        // cast 或 括号表达式
+        if self.cur_is_punct("(") {
+            let mark = self.save();
+            self.bump(); // '('
+            if let Some(ty) = self.parse_type_name_simple() {
+                if self.cur_is_punct(")") {
+                    self.bump(); // ')'
+                    // C cast: (type) unary
+                    let e = self.parse_unary();
+                    return Expr::Cast { ty, expr: Box::new(e) };
+                }
+            }
+            // 回退为括号表达式
+            self.restore(mark);
+        }
+
+        // 一元 + - ! ~ & *
         if self.cur_is_op("+") || self.cur_is_op("-") || self.cur_is_op("!")
             || self.cur_is_op("~") || self.cur_is_op("&") || self.cur_is_op("*")
         {
@@ -536,6 +604,7 @@ impl Parser {
             let e=self.parse_unary();
             return Expr::Unary{ op, expr: Box::new(e) };
         }
+
         self.parse_postfix()
     }
 
@@ -594,13 +663,19 @@ impl Parser {
         if self.cur_is(&TokenType::StringLiteral){ return Expr::Str(self.bump().unwrap().text().to_string()); }
         if self.cur_is(&TokenType::CharLiteral){ return Expr::Char(self.bump().unwrap().text().to_string()); }
         if self.cur_is(&TokenType::Identifier){ return Expr::Ident(self.bump().unwrap().text().to_string()); }
-        if self.cur_is_punct("("){ self.bump(); let e=self.parse_expr(); if !self.cur_is_punct(")"){ self.err_custom_here("E3001","unclosed parenthesized expression, expected ')'"); } self.expect_punct(")"); return e; }
+        if self.cur_is_punct("("){
+            self.bump();
+            let e=self.parse_expr();
+            if !self.cur_is_punct(")"){ self.err_custom_here("E3001","unclosed parenthesized expression, expected ')'"); }
+            self.expect_punct(")");
+            return e;
+        }
         self.err_custom_here("E2301", "expected expression");
         Expr::Ident("_err".into())
     }
 }
 
-/* ===================== 打印器（保持不变，方便调试） ===================== */
+/* ===================== 打印器（含新表达式） ===================== */
 
 pub fn stringify_items(items: &[Item]) -> String {
     fn indent(n:usize)->String{ "  ".repeat(n) }
@@ -613,6 +688,9 @@ pub fn stringify_items(items: &[Item]) -> String {
             s.push(']');
         }
         s
+    }
+    fn fmt_ctype(t:&CType)->String{
+        if t.ptr>0 { format!("{} {}", t.base, "*".repeat(t.ptr)) } else { t.base.clone() }
     }
 
     fn fmt_expr(e:&Expr, _d:usize, out:&mut String){
@@ -635,6 +713,14 @@ pub fn stringify_items(items: &[Item]) -> String {
                 for (i,ee) in list.iter().enumerate(){ if i>0 { out.push_str(", "); } fmt_expr(ee,0,out); }
                 out.push(')');
             }
+            Expr::Cast{ty,expr} => {
+                out.push_str("(("); out.push_str(&fmt_ctype(ty)); out.push_str(") ");
+                fmt_expr(expr, 0, out); out.push(')');
+            }
+            Expr::SizeofExpr(x) => { out.push_str("sizeof "); fmt_expr(x,0,out); }
+            Expr::SizeofType(t) => { out.push_str("sizeof("); out.push_str(&fmt_ctype(t)); out.push(')'); }
+            Expr::AlignofExpr(x) => { out.push_str("alignof "); fmt_expr(x,0,out); }
+            Expr::AlignofType(t) => { out.push_str("alignof("); out.push_str(&fmt_ctype(t)); out.push(')'); }
         }
     }
 
