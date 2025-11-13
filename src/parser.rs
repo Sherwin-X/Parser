@@ -24,12 +24,19 @@ pub enum Expr {
     PtrMember { base: Box<Expr>, field: String },
     Comma(Vec<Expr>),
 
-    // === 新增：cast / sizeof / alignof ===
+    // Cast / sizeof / alignof
     Cast { ty: CType, expr: Box<Expr> },
     SizeofExpr(Box<Expr>),
     SizeofType(CType),
     AlignofExpr(Box<Expr>),
     AlignofType(CType),
+}
+
+// === 新增：初始化器（= expr | = { init, init, ... }，可嵌套） ===
+#[derive(Debug, Clone)]
+pub enum Init {
+    Expr(Expr),
+    List(Vec<Init>),
 }
 
 // 极简类型：基础类型 + 若干层 *
@@ -49,7 +56,7 @@ pub struct Param {
 
 #[derive(Debug, Clone)]
 pub enum Stmt {
-    VarDecl { ty: String, ptr: usize, name: String, array_dims: Vec<Option<String>>, init: Option<Expr> },
+    VarDecl { ty: String, ptr: usize, name: String, array_dims: Vec<Option<String>>, init: Option<Init> },
     Return(Option<Expr>),
     If     { cond: Expr, then_branch: Box<Stmt>, else_branch: Option<Box<Stmt>> },
     While  { cond: Expr, body: Box<Stmt> },
@@ -213,9 +220,10 @@ impl Parser {
                         };
                         items.push(Item::Function{ ret: base_ty, ret_ptr, name, params, body });
                     } else {
+                        // 全局变量声明
                         let first_dims = self.parse_array_dims_multi();
-                        let first_init = if self.cur_is_op("=") { self.bump(); Some(self.parse_expr()) } else { None };
-                        let mut decls: Vec<(usize, String, Vec<Option<String>>, Option<Expr>)> =
+                        let first_init = if self.cur_is_op("=") { self.bump(); Some(self.parse_initializer()) } else { None };
+                        let mut decls: Vec<(usize, String, Vec<Option<String>>, Option<Init>)> =
                             vec![(0, name, first_dims, first_init)];
 
                         while self.cur_is_punct(",") {
@@ -224,7 +232,7 @@ impl Parser {
                             if self.cur_is(&TokenType::Identifier) {
                                 let nm = self.bump().unwrap().text().to_string();
                                 let dims = self.parse_array_dims_multi();
-                                let ini  = if self.cur_is_op("=") { self.bump(); Some(self.parse_expr()) } else { None };
+                                let ini  = if self.cur_is_op("=") { self.bump(); Some(self.parse_initializer()) } else { None };
                                 decls.push((ptr, nm, dims, ini));
                             } else { self.err_custom_here("E2102", "expected identifier after ',' in declaration"); break; }
                         }
@@ -349,9 +357,9 @@ impl Parser {
             self.bump().unwrap().text().to_string()
         } else { self.err_custom_here("E2104", "expected identifier in declaration"); "_err".into() };
         let first_dims = self.parse_array_dims_multi();
-        let init= if self.cur_is_op("=") { self.bump(); Some(self.parse_expr()) } else { None };
+        let init= if self.cur_is_op("=") { self.bump(); Some(self.parse_initializer()) } else { None };
 
-        let mut decls: Vec<(usize, String, Vec<Option<String>>, Option<Expr>)> =
+        let mut decls: Vec<(usize, String, Vec<Option<String>>, Option<Init>)> =
             vec![(first_ptr, name, first_dims, init)];
 
         while self.cur_is_punct(",") {
@@ -360,7 +368,7 @@ impl Parser {
             if self.cur_is(&TokenType::Identifier){
                 let nm = self.bump().unwrap().text().to_string();
                 let dims = self.parse_array_dims_multi();
-                let ini  = if self.cur_is_op("=") { self.bump(); Some(self.parse_expr()) } else { None };
+                let ini  = if self.cur_is_op("=") { self.bump(); Some(self.parse_initializer()) } else { None };
                 decls.push((ptr, nm, dims, ini));
             } else { self.err_custom_here("E2102", "expected identifier after ',' in declaration"); break; }
         }
@@ -481,6 +489,41 @@ impl Parser {
         Stmt::ExprStmt(e)
     }
 
+    /* ===================== 初始化器 ===================== */
+
+    // initializer := assignment_expr
+    //              | '{' [initializer (',' initializer)* [',']] '}'
+    fn parse_initializer(&mut self) -> Init {
+        if self.cur_is_punct("{") {
+            self.bump();
+            let mut list = Vec::new();
+            if !self.cur_is_punct("}") {
+                loop {
+                    list.push(self.parse_initializer());
+                    if self.cur_is_punct("}") { break; }
+                    if self.cur_is_punct(",") {
+                        self.bump();
+                        if self.cur_is_punct("}") {
+                            // 允许拖尾逗号
+                            break;
+                        }
+                        continue;
+                    } else {
+                        self.err_custom_here("E4002", "missing ',' between initializers");
+                        break;
+                    }
+                }
+            }
+            if !self.cur_is_punct("}") {
+                self.err_custom_here("E4001", "unclosed initializer list, expected '}'");
+            }
+            self.expect_punct("}");
+            Init::List(list)
+        } else {
+            Init::Expr(self.parse_assignment())
+        }
+    }
+
     /* ===================== 表达式 ===================== */
 
     pub fn parse_expr(&mut self)->Expr{
@@ -587,12 +630,10 @@ impl Parser {
             if let Some(ty) = self.parse_type_name_simple() {
                 if self.cur_is_punct(")") {
                     self.bump(); // ')'
-                    // C cast: (type) unary
                     let e = self.parse_unary();
                     return Expr::Cast { ty, expr: Box::new(e) };
                 }
             }
-            // 回退为括号表达式
             self.restore(mark);
         }
 
@@ -675,7 +716,7 @@ impl Parser {
     }
 }
 
-/* ===================== 打印器（含新表达式） ===================== */
+/* ===================== 打印器（含 Init） ===================== */
 
 pub fn stringify_items(items: &[Item]) -> String {
     fn indent(n:usize)->String{ "  ".repeat(n) }
@@ -724,12 +765,29 @@ pub fn stringify_items(items: &[Item]) -> String {
         }
     }
 
-    fn fmt_decl_line(prefix:&str, ty:&str, ptr:usize, name:&str, array_dims:&[Option<String>], init:&Option<Expr>, d:usize, out:&mut String){
+    fn fmt_init(init: &Init, d:usize, out:&mut String) {
+        match init {
+            Init::Expr(e) => fmt_expr(e, d, out),
+            Init::List(list) => {
+                out.push('{');
+                for (i, it) in list.iter().enumerate() {
+                    if i > 0 { out.push_str(", "); }
+                    fmt_init(it, d, out);
+                }
+                out.push('}');
+            }
+        }
+    }
+
+    fn fmt_decl_line(prefix:&str, ty:&str, ptr:usize, name:&str, array_dims:&[Option<String>], init:&Option<Init>, d:usize, out:&mut String){
         out.push_str(&format!("{}{} {}{}", indent(d), prefix, ty, if ptr>0 { format!(" {}", stars(ptr)) } else { "".into() }));
         out.push(' ');
         out.push_str(name);
         out.push_str(&fmt_dims(array_dims));
-        if let Some(e)=init{ out.push_str(" = "); fmt_expr(e,d,out); }
+        if let Some(i)=init{
+            out.push_str(" = ");
+            fmt_init(i, d, out);
+        }
         out.push('\n');
     }
 
