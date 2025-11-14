@@ -14,7 +14,7 @@ pub enum Expr {
     Unary  { op: String, expr: Box<Expr> },      // + - ! ~ & *
     Call   { callee: String, args: Vec<Expr> },
     Assign { op: String, lhs: Box<Expr>, rhs: Box<Expr> },
-    Ternary { cond: Box<Expr>, then_e: Box<Expr>, else_e: Box<Expr> },
+    Ternary { cond: Box<Box<Expr>>, then_e: Box<Expr>, else_e: Box<Expr> },
     PostInc(Box<Expr>),
     PostDec(Box<Expr>),
     PreInc(Box<Expr>),
@@ -32,7 +32,7 @@ pub enum Expr {
     AlignofType(CType),
 }
 
-// === 新增：初始化器（= expr | = { init, init, ... }，可嵌套） ===
+// 初始化器：= expr | = { init, ... }（可嵌套、允许拖尾逗号）
 #[derive(Debug, Clone)]
 pub enum Init {
     Expr(Expr),
@@ -159,6 +159,10 @@ impl Parser {
         self.err_push("E1001", format!("expected {}, found {}", expected, got), span);
         self.sync();
     }
+    fn err_custom_span(&mut self, code: &'static str, msg: String, span: Span) {
+        self.err_push(code, msg, span);
+        self.sync();
+    }
     fn err_custom_here(&mut self, code: &'static str, msg: &str) {
         let span = self.cur_span();
         self.err_push(code, msg.to_string(), span);
@@ -208,7 +212,9 @@ impl Parser {
                 let ret_ptr = self.parse_pointer_stars();
 
                 if self.cur_is(&TokenType::Identifier) {
-                    let name = self.bump().unwrap().text().to_string();
+                    let name_tok = self.bump().unwrap();
+                    let name = name_tok.text().to_string();
+                    let name_span = name_tok.span();
 
                     if self.cur_is_punct("(") {
                         let params = self.parse_params();
@@ -223,23 +229,32 @@ impl Parser {
                         // 全局变量声明
                         let first_dims = self.parse_array_dims_multi();
                         let first_init = if self.cur_is_op("=") { self.bump(); Some(self.parse_initializer()) } else { None };
-                        let mut decls: Vec<(usize, String, Vec<Option<String>>, Option<Init>)> =
-                            vec![(0, name, first_dims, first_init)];
+                        let mut decls: Vec<(usize, String, Span, Vec<Option<String>>, Option<Init>)> =
+                            vec![(0, name, name_span, first_dims, first_init)];
 
                         while self.cur_is_punct(",") {
                             self.bump();
                             let ptr = self.parse_pointer_stars();
                             if self.cur_is(&TokenType::Identifier) {
-                                let nm = self.bump().unwrap().text().to_string();
+                                let nm_tok = self.bump().unwrap();
+                                let nm = nm_tok.text().to_string();
+                                let nm_span = nm_tok.span();
                                 let dims = self.parse_array_dims_multi();
                                 let ini  = if self.cur_is_op("=") { self.bump(); Some(self.parse_initializer()) } else { None };
-                                decls.push((ptr, nm, dims, ini));
+                                decls.push((ptr, nm, nm_span, dims, ini));
                             } else { self.err_custom_here("E2102", "expected identifier after ',' in declaration"); break; }
                         }
                         if !self.expect_token_text(";"){ self.err_custom_here("E2001", "missing ';' after declaration"); }
 
+                        // 形状/容量校验
+                        for (_, nm, nm_span, dims, ini) in &decls {
+                            if let Some(init) = ini {
+                                self.validate_array_initializer(nm, *nm_span, dims, init);
+                            }
+                        }
+
                         let mut stmts = vec![];
-                        for (ptr, nm, dims, ini) in decls {
+                        for (ptr, nm, _sp, dims, ini) in decls {
                             stmts.push(Stmt::VarDecl{ ty: base_ty.clone(), ptr, name: nm, array_dims: dims, init: ini });
                         }
                         items.push(Item::Global(if stmts.len()==1 { stmts.pop().unwrap() } else { Stmt::Block(stmts) }));
@@ -268,7 +283,6 @@ impl Parser {
         n
     }
 
-    // 仅支持：<type-kw> <stars>*
     fn parse_type_name_simple(&mut self) -> Option<CType> {
         if !self.peek_type_keyword() { return None; }
         let base = self.bump().unwrap().text().to_string();
@@ -353,30 +367,42 @@ impl Parser {
         let base_ty=self.bump().unwrap().text().to_string();
 
         let first_ptr = self.parse_pointer_stars();
-        let name= if self.cur_is(&TokenType::Identifier){
-            self.bump().unwrap().text().to_string()
-        } else { self.err_custom_here("E2104", "expected identifier in declaration"); "_err".into() };
+        let name_tok = if self.cur_is(&TokenType::Identifier){
+            self.bump().unwrap()
+        } else { self.err_custom_here("E2104", "expected identifier in declaration"); self.bump().unwrap_or_else(|| self.tokens[self.i.saturating_sub(1)].clone()) };
+        let name = name_tok.text().to_string();
+        let name_span = name_tok.span();
+
         let first_dims = self.parse_array_dims_multi();
         let init= if self.cur_is_op("=") { self.bump(); Some(self.parse_initializer()) } else { None };
 
-        let mut decls: Vec<(usize, String, Vec<Option<String>>, Option<Init>)> =
-            vec![(first_ptr, name, first_dims, init)];
+        let mut decls: Vec<(usize, String, Span, Vec<Option<String>>, Option<Init>)> =
+            vec![(first_ptr, name, name_span, first_dims, init)];
 
         while self.cur_is_punct(",") {
             self.bump();
             let ptr = self.parse_pointer_stars();
             if self.cur_is(&TokenType::Identifier){
-                let nm = self.bump().unwrap().text().to_string();
+                let nm_tok = self.bump().unwrap();
+                let nm = nm_tok.text().to_string();
+                let nm_span = nm_tok.span();
                 let dims = self.parse_array_dims_multi();
                 let ini  = if self.cur_is_op("=") { self.bump(); Some(self.parse_initializer()) } else { None };
-                decls.push((ptr, nm, dims, ini));
+                decls.push((ptr, nm, nm_span, dims, ini));
             } else { self.err_custom_here("E2102", "expected identifier after ',' in declaration"); break; }
         }
 
         if !self.expect_token_text(";") { self.err_custom_here("E2001", "missing ';' after declaration"); }
 
+        // 校验
+        for (_, nm, nm_span, dims, ini) in &decls {
+            if let Some(init) = ini {
+                self.validate_array_initializer(nm, *nm_span, dims, init);
+            }
+        }
+
         let mut v = vec![];
-        for (ptr, nm, dims, ini) in decls {
+        for (ptr, nm, _sp, dims, ini) in decls {
             v.push(Stmt::VarDecl{ ty: base_ty.clone(), ptr, name: nm, array_dims: dims, init: ini });
         }
         if v.len()==1 { v.pop().unwrap() } else { Stmt::Block(v) }
@@ -558,7 +584,7 @@ impl Parser {
             let then_e = self.parse_assignment();
             if !self.expect_token_text(":") { self.err_custom_here("E2008","missing ':' in conditional expression"); }
             let else_e = self.parse_assignment();
-            return Expr::Ternary{ cond: Box::new(cond), then_e: Box::new(then_e), else_e: Box::new(else_e) };
+            return Expr::Ternary{ cond: Box::new(Box::new(cond)), then_e: Box::new(then_e), else_e: Box::new(else_e) };
         }
         cond
     }
@@ -713,6 +739,70 @@ impl Parser {
         }
         self.err_custom_here("E2301", "expected expression");
         Expr::Ident("_err".into())
+    }
+
+    /* ============ 数组初始化器校验（本步新增） ============ */
+
+    fn dims_to_capacity(&self, dims: &[Option<String>]) -> Option<usize> {
+        let mut cap: usize = 1;
+        for d in dims {
+            match d {
+                Some(s) => {
+                    if let Ok(v) = s.parse::<usize>() {
+                        cap = cap.saturating_mul(v);
+                    } else {
+                        return None; // 非整数字面量
+                    }
+                }
+                None => return None, // 不定长
+            }
+        }
+        Some(cap)
+    }
+
+    fn init_count_and_depth(init: &Init) -> (usize, usize) {
+        match init {
+            Init::Expr(_) => (1, 0),
+            Init::List(list) => {
+                let mut total = 0;
+                let mut maxd = 0;
+                for it in list {
+                    let (c, d) = Self::init_count_and_depth(it);
+                    total += c;
+                    if d > maxd { maxd = d; }
+                }
+                (total, maxd + 1)
+            }
+        }
+    }
+
+    fn validate_array_initializer(&mut self, name: &str, name_span: Span, dims: &[Option<String>], init: &Init) {
+        if dims.is_empty() {
+            // 非数组，不做校验
+            return;
+        }
+        let rank = dims.len();
+        let (_cnt, depth) = Self::init_count_and_depth(init);
+
+        if depth > rank {
+            self.err_custom_span(
+                "E4102",
+                format!("initializer for '{}' has too many brace levels for an array of rank {}", name, rank),
+                name_span,
+            );
+            return;
+        }
+
+        if let Some(cap) = self.dims_to_capacity(dims) {
+            let (cnt, _) = Self::init_count_and_depth(init);
+            if cnt > cap {
+                self.err_custom_span(
+                    "E4101",
+                    format!("too many initializers for '{}': have {}, but capacity is {}", name, cnt, cap),
+                    name_span,
+                );
+            }
+        }
     }
 }
 
