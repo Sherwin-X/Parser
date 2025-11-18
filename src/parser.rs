@@ -1,5 +1,5 @@
-// parser.rs
 use crate::token::{Token, TokenType, Span};
+use std::collections::HashSet;
 
 /* ===================== AST ===================== */
 
@@ -117,11 +117,20 @@ pub struct Parser {
     i: usize,
     source: String,
     pub errors: Vec<ParseError>,
+
+    // 本步新增：typedef 符号表（只存名字，不展开真实类型）
+    typedefs: HashSet<String>,
 }
 
 impl Parser {
     pub fn new(tokens: Vec<Token>, source: String) -> Self {
-        Self { tokens, i: 0, source, errors: vec![] }
+        Self {
+            tokens,
+            i: 0,
+            source,
+            errors: vec![],
+            typedefs: HashSet::new(),
+        }
     }
 
     #[inline] fn at_end(&self)->bool{ self.i>=self.tokens.len() }
@@ -205,9 +214,10 @@ impl Parser {
         }
     }
 
-    /* ===================== 类型关键字工具 ===================== */
+    /* ===================== 类型关键字 / typedef 辅助 ===================== */
 
-    fn is_type_kw_token(t: &Token) -> bool {
+    // 仅内建类型关键字（不是 typedef 名字）
+    fn is_builtin_type_kw_token(t: &Token) -> bool {
         if !matches!(t.kind(), TokenType::Keyword) { return false; }
         matches!(
             t.text(),
@@ -216,16 +226,27 @@ impl Parser {
         )
     }
 
-    fn peek_type_keyword(&self) -> bool {
-        self.cur().map(Self::is_type_kw_token).unwrap_or(false)
+    // 当前 token 是否可以开始一个 "类型"（内建组合或者 typedef 名字）
+    fn peek_type_start(&self) -> bool {
+        if let Some(t) = self.cur() {
+            if Self::is_builtin_type_kw_token(t) {
+                return true;
+            }
+            if matches!(t.kind(), TokenType::Identifier) && self.typedefs.contains(t.text()) {
+                return true;
+            }
+        }
+        false
     }
 
-    // 解析一串基础类型关键字：如 "unsigned long int"
-    fn parse_type_keyword_seq(&mut self) -> Option<Vec<String>> {
-        if !self.peek_type_keyword() { return None; }
+    // 解析一串内建类型关键字：例如 "unsigned long int"
+    fn parse_builtin_type_keyword_seq(&mut self) -> Option<Vec<String>> {
+        if !self.cur().map(Self::is_builtin_type_kw_token).unwrap_or(false) {
+            return None;
+        }
         let mut specs = Vec::new();
         while let Some(t) = self.cur() {
-            if Self::is_type_kw_token(t) {
+            if Self::is_builtin_type_kw_token(t) {
                 specs.push(t.text().to_string());
                 self.bump();
             } else {
@@ -239,18 +260,44 @@ impl Parser {
         specs.join(" ")
     }
 
-    // 声明里的「基础类型」（不含 *），比如 "unsigned long int"
+    // 声明里的「基础类型」（不含 *），可以是内建组合或 typedef 名
     fn parse_decl_base_type(&mut self) -> Option<String> {
-        let specs = self.parse_type_keyword_seq()?;
-        Some(Self::specs_to_string(&specs))
+        // 尝试内建组合
+        if let Some(specs) = self.parse_builtin_type_keyword_seq() {
+            return Some(Self::specs_to_string(&specs));
+        }
+        // 尝试 typedef 名
+        if let Some(t) = self.cur() {
+            if matches!(t.kind(), TokenType::Identifier) && self.typedefs.contains(t.text()) {
+                let name = t.text().to_string();
+                self.bump();
+                return Some(name);
+            }
+        }
+        None
     }
 
     // 类型名（含 *），用于 cast / sizeof(type) / alignof(type)
     fn parse_type_name_full(&mut self) -> Option<CType> {
-        let specs = self.parse_type_keyword_seq()?;
-        let base = Self::specs_to_string(&specs);
-        let ptr = self.parse_pointer_stars();
-        Some(CType { base, ptr })
+        // 1. 尝试内建组合
+        let mark = self.save();
+        if let Some(specs) = self.parse_builtin_type_keyword_seq() {
+            let base = Self::specs_to_string(&specs);
+            let ptr = self.parse_pointer_stars();
+            return Some(CType { base, ptr });
+        }
+        self.restore(mark);
+
+        // 2. 尝试 typedef 名
+        if let Some(t) = self.cur() {
+            if matches!(t.kind(), TokenType::Identifier) && self.typedefs.contains(t.text()) {
+                let base = t.text().to_string();
+                self.bump();
+                let ptr = self.parse_pointer_stars();
+                return Some(CType { base, ptr });
+            }
+        }
+        None
     }
 
     /* ===================== 入口 ===================== */
@@ -261,7 +308,14 @@ impl Parser {
             self.skip_trivia();
             if self.at_end(){ break; }
 
-            if self.peek_type_keyword() {
+            // 1) typedef 声明：不会生成 Item，只更新 self.typedefs
+            if self.cur_is_kw("typedef") {
+                self.parse_typedef_decl();
+                continue;
+            }
+
+            // 2) 正常的函数 / 全局变量
+            if self.peek_type_start() {
                 let base_ty = match self.parse_decl_base_type() {
                     Some(t) => t,
                     None => {
@@ -290,7 +344,7 @@ impl Parser {
                         let first_dims = self.parse_array_dims_multi();
                         let first_init = if self.cur_is_op("=") { self.bump(); Some(self.parse_initializer()) } else { None };
                         let mut decls: Vec<(usize, String, Span, Vec<Option<String>>, Option<Init>)> =
-                            vec![(0, name, name_span, first_dims, first_init)];
+                            vec![(ret_ptr, name, name_span, first_dims, first_init)];
 
                         while self.cur_is_punct(",") {
                             self.bump();
@@ -330,6 +384,49 @@ impl Parser {
         items
     }
 
+    /* ===================== typedef 解析（本步新增） ===================== */
+
+    fn parse_typedef_decl(&mut self) {
+        self.expect_kw("typedef");
+
+        let base_ty = match self.parse_decl_base_type() {
+            Some(t) => t,
+            None => {
+                self.err_custom_here("E5100", "expected type name after 'typedef'");
+                return;
+            }
+        };
+        let _base_ptr = self.parse_pointer_stars(); // 简化：当前不展开别名里的指针，只解析语法
+
+        // typedef int MyInt, *PInt;
+        let mut first = true;
+        loop {
+            if !self.cur_is(&TokenType::Identifier) {
+                if first {
+                    self.err_custom_here("E5101", "expected typedef name");
+                }
+                break;
+            }
+            let nm_tok = self.bump().unwrap();
+            let nm = nm_tok.text().to_string();
+            let _dims = self.parse_array_dims_multi(); // 语法上接受数组 typedef，但不展开
+
+            // 把别名名字记录到 typedef 符号表
+            self.typedefs.insert(nm);
+            first = false;
+
+            if !self.cur_is_punct(",") {
+                break;
+            }
+            self.bump();
+        }
+
+        if !self.expect_token_text(";") {
+            self.err_custom_here("E2001", "missing ';' after typedef");
+        }
+        let _ = base_ty; // 当前不使用真实底层类型，仅记录名字
+    }
+
     /* ===================== 指针与数组维度 ===================== */
 
     fn parse_pointer_stars(&mut self) -> usize {
@@ -360,7 +457,7 @@ impl Parser {
         let mut v=vec![];
         if !self.cur_is_punct(")") {
             loop {
-                if !self.peek_type_keyword(){ self.err_custom_here("E2103", "expected type in parameter"); break; }
+                if !self.peek_type_start(){ self.err_custom_here("E2103", "expected type in parameter"); break; }
                 let ty = self.parse_decl_base_type().unwrap_or_else(|| "int".to_string());
                 let ptr=self.parse_pointer_stars();
                 let name= if self.cur_is(&TokenType::Identifier){
@@ -387,7 +484,7 @@ impl Parser {
         self.skip_trivia();
         if self.at_end(){ return Stmt::Empty; }
         if self.cur_is_punct("{"){ return self.parse_block(); }
-        if self.peek_type_keyword(){ return self.parse_var_decl_stmt(); }
+        if self.peek_type_start(){ return self.parse_var_decl_stmt(); }
         if self.cur_is_kw("return"){ return self.parse_return(); }
         if self.cur_is_kw("if"){ return self.parse_if(); }
         if self.cur_is_kw("while"){ return self.parse_while(); }
@@ -498,7 +595,7 @@ impl Parser {
 
         let init = if self.cur_is_punct(";"){
             self.bump(); None
-        } else if self.peek_type_keyword(){
+        } else if self.peek_type_start(){
             Some(Box::new(self.parse_var_decl_stmt()))
         } else {
             Some(Box::new(self.parse_expr_stmt()))
@@ -798,7 +895,7 @@ impl Parser {
         Expr::Ident("_err".into())
     }
 
-    /* ============ 数组初始化器校验 ============ */
+    /* ============ 数组初始化器校验（之前的改进） ============ */
 
     fn dims_to_capacity(&self, dims: &[Option<String>]) -> Option<usize> {
         let mut cap: usize = 1;

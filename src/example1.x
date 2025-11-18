@@ -5,6 +5,25 @@
 
 #define MAXN 8   // 预处理行会被作为 Preprocessor token（当前不会真正处理）
 
+typedef unsigned long size_t;
+typedef int MyInt, *MyIntPtr;
+typedef MyInt Matrix[2][3];
+
+size_t g_len;
+MyInt   g_val = 42;
+Matrix  mat = { {1,2,3}, {4,5,6} };
+
+int main() {
+  MyInt x = 1;
+  MyIntPtr p = &x;
+  size_t n = sizeof(size_t);
+  Matrix m = { {1,2,3}, {4,5,6} };
+
+  x = (MyInt) (x + 3);
+  return (int)(x + *p + (int)n + m[1][2]);
+}
+
+
 // ==== 全局声明（多声明、指针、多维数组、可选维度） ====
 int g, h = 1, *pg;
 int grid[3][2], table[][4];      // 第二个维度指定，第一维留空（仅语法测试）

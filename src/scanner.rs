@@ -182,11 +182,14 @@ impl<'a> Scanner<'a> {
         let text = &self.src[si..self.pos];
 
         let kw = matches!(text,
-            "int" | "float" | "double" | "char" | "void" |
+            "void" | "char" | "short" | "int" | "long" |
+            "signed" | "unsigned" | "float" | "double" |
             "if" | "else" | "for" | "while" | "return" |
             "switch" | "case" | "default" | "break" | "continue" |
-            "sizeof"| "alignof" 
+            "sizeof" | "alignof" |
+            "typedef"        
         );
+
 
         let kind = if kw { TokenType::Keyword } else { TokenType::Identifier };
         self.push_tok(kind, text.to_string(), sp);
