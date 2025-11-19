@@ -187,7 +187,7 @@ impl<'a> Scanner<'a> {
             "if" | "else" | "for" | "while" | "return" |
             "switch" | "case" | "default" | "break" | "continue" |
             "sizeof" | "alignof" |
-            "typedef"        
+            "typedef" | "struct" | "union" | "enum" 
         );
 
 

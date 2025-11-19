@@ -118,7 +118,7 @@ pub struct Parser {
     source: String,
     pub errors: Vec<ParseError>,
 
-    // 本步新增：typedef 符号表（只存名字，不展开真实类型）
+    // typedef 符号表（只存名字，不展开真实类型）
     typedefs: HashSet<String>,
 }
 
@@ -226,7 +226,7 @@ impl Parser {
         )
     }
 
-    // 当前 token 是否可以开始一个 "类型"（内建组合或者 typedef 名字）
+    // 当前 token 是否可以开始一个 "类型"（内建组合 / typedef 名 / struct/union/enum 标签类型）
     fn peek_type_start(&self) -> bool {
         if let Some(t) = self.cur() {
             if Self::is_builtin_type_kw_token(t) {
@@ -234,6 +234,14 @@ impl Parser {
             }
             if matches!(t.kind(), TokenType::Identifier) && self.typedefs.contains(t.text()) {
                 return true;
+            }
+            // 本步新增：struct / union / enum 标签类型
+            if matches!(t.text(), "struct" | "union" | "enum") {
+                if let Some(nxt) = self.tokens.get(self.i + 1) {
+                    if matches!(nxt.kind(), TokenType::Identifier) {
+                        return true;
+                    }
+                }
             }
         }
         false
@@ -260,19 +268,30 @@ impl Parser {
         specs.join(" ")
     }
 
-    // 声明里的「基础类型」（不含 *），可以是内建组合或 typedef 名
+    // 声明里的「基础类型」（不含 *），可以是内建组合 / typedef 名 / struct/union/enum Tag
     fn parse_decl_base_type(&mut self) -> Option<String> {
-        // 尝试内建组合
+        // 1) 内建组合
         if let Some(specs) = self.parse_builtin_type_keyword_seq() {
             return Some(Self::specs_to_string(&specs));
         }
-        // 尝试 typedef 名
+        // 2) typedef 名
         if let Some(t) = self.cur() {
             if matches!(t.kind(), TokenType::Identifier) && self.typedefs.contains(t.text()) {
                 let name = t.text().to_string();
                 self.bump();
                 return Some(name);
             }
+        }
+        // 3) struct / union / enum 标签类型
+        if self.cur_is_kw("struct") || self.cur_is_kw("union") || self.cur_is_kw("enum") {
+            let kw = self.bump().unwrap().text().to_string();
+            let tag = if self.cur_is(&TokenType::Identifier) {
+                self.bump().unwrap().text().to_string()
+            } else {
+                self.err_custom_here("E5201", "expected tag name after 'struct'/'union'/'enum'");
+                "_anon".into()
+            };
+            return Some(format!("{} {}", kw, tag));
         }
         None
     }
@@ -297,6 +316,21 @@ impl Parser {
                 return Some(CType { base, ptr });
             }
         }
+
+        // 3. 尝试 struct / union / enum 标签类型
+        if self.cur_is_kw("struct") || self.cur_is_kw("union") || self.cur_is_kw("enum") {
+            let kw = self.bump().unwrap().text().to_string();
+            let tag = if self.cur_is(&TokenType::Identifier) {
+                self.bump().unwrap().text().to_string()
+            } else {
+                self.err_custom_here("E5201", "expected tag name after 'struct'/'union'/'enum'");
+                "_anon".into()
+            };
+            let base = format!("{} {}", kw, tag);
+            let ptr = self.parse_pointer_stars();
+            return Some(CType { base, ptr });
+        }
+
         None
     }
 
@@ -308,13 +342,12 @@ impl Parser {
             self.skip_trivia();
             if self.at_end(){ break; }
 
-            // 1) typedef 声明：不会生成 Item，只更新 self.typedefs
+            // typedef 声明：不会生成 Item，只更新 typedef 集合
             if self.cur_is_kw("typedef") {
                 self.parse_typedef_decl();
                 continue;
             }
 
-            // 2) 正常的函数 / 全局变量
             if self.peek_type_start() {
                 let base_ty = match self.parse_decl_base_type() {
                     Some(t) => t,
@@ -384,7 +417,7 @@ impl Parser {
         items
     }
 
-    /* ===================== typedef 解析（本步新增） ===================== */
+    /* ===================== typedef 解析 ===================== */
 
     fn parse_typedef_decl(&mut self) {
         self.expect_kw("typedef");
@@ -396,7 +429,7 @@ impl Parser {
                 return;
             }
         };
-        let _base_ptr = self.parse_pointer_stars(); // 简化：当前不展开别名里的指针，只解析语法
+        let _base_ptr = self.parse_pointer_stars(); // 当前不展开别名里的指针，只解析语法
 
         // typedef int MyInt, *PInt;
         let mut first = true;
@@ -671,8 +704,6 @@ impl Parser {
 
     /* ===================== 初始化器 ===================== */
 
-    // initializer := assignment_expr
-    //              | '{' [initializer (',' initializer)* [',']] '}'
     fn parse_initializer(&mut self) -> Init {
         if self.cur_is_punct("{") {
             self.bump();
@@ -684,8 +715,7 @@ impl Parser {
                     if self.cur_is_punct(",") {
                         self.bump();
                         if self.cur_is_punct("}") {
-                            // 允许拖尾逗号
-                            break;
+                            break; // 允许拖尾逗号
                         }
                         continue;
                     } else {
@@ -895,7 +925,7 @@ impl Parser {
         Expr::Ident("_err".into())
     }
 
-    /* ============ 数组初始化器校验（之前的改进） ============ */
+    /* ============ 数组初始化器校验 ============ */
 
     fn dims_to_capacity(&self, dims: &[Option<String>]) -> Option<usize> {
         let mut cap: usize = 1;
@@ -932,8 +962,7 @@ impl Parser {
 
     fn validate_array_initializer(&mut self, name: &str, name_span: Span, dims: &[Option<String>], init: &Init) {
         if dims.is_empty() {
-            // 非数组，不做校验
-            return;
+            return; // 非数组
         }
         let rank = dims.len();
         let (_cnt, depth) = Self::init_count_and_depth(init);
