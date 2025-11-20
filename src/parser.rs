@@ -81,10 +81,34 @@ pub struct Case {
     pub body: Vec<Stmt>,
 }
 
+/* ===== 新增：struct/union/enum 的 AST 节点 ===== */
+
+#[derive(Debug, Clone)]
+pub struct StructField {
+    pub ty: String,
+    pub ptr: usize,
+    pub name: String,
+    pub array_dims: Vec<Option<String>>,
+}
+
+#[derive(Debug, Clone)]
+pub enum StructKind {
+    Struct,
+    Union,
+}
+
+#[derive(Debug, Clone)]
+pub struct EnumConst {
+    pub name: String,
+    pub value: Option<Expr>, // 允许 RED = 10 这样的表达式
+}
+
 #[derive(Debug, Clone)]
 pub enum Item {
     Function { ret: String, ret_ptr: usize, name: String, params: Vec<Param>, body: Stmt },
     Global(Stmt),
+    StructDef { kind: StructKind, name: String, fields: Vec<StructField> },
+    EnumDef   { name: String, consts: Vec<EnumConst> },
 }
 
 /* ===================== 错误结构（带 caret） ===================== */
@@ -235,7 +259,7 @@ impl Parser {
             if matches!(t.kind(), TokenType::Identifier) && self.typedefs.contains(t.text()) {
                 return true;
             }
-            // 本步新增：struct / union / enum 标签类型
+            // struct / union / enum 标签类型
             if matches!(t.text(), "struct" | "union" | "enum") {
                 if let Some(nxt) = self.tokens.get(self.i + 1) {
                     if matches!(nxt.kind(), TokenType::Identifier) {
@@ -342,12 +366,61 @@ impl Parser {
             self.skip_trivia();
             if self.at_end(){ break; }
 
-            // typedef 声明：不会生成 Item，只更新 typedef 集合
+            // 1) typedef 声明：不会生成 Item，只更新 typedef 集合
             if self.cur_is_kw("typedef") {
                 self.parse_typedef_decl();
                 continue;
             }
 
+            // 2) struct / union 定义：struct Point { ... };
+            if self.cur_is_kw("struct") || self.cur_is_kw("union") {
+                let mark = self.save();
+                let kw_tok = self.bump().unwrap();
+                let kind = if kw_tok.text() == "struct" {
+                    StructKind::Struct
+                } else {
+                    StructKind::Union
+                };
+                let name = if self.cur_is(&TokenType::Identifier) {
+                    self.bump().unwrap().text().to_string()
+                } else {
+                    self.err_custom_here("E5201", "expected tag name after 'struct'/'union'");
+                    "_anon".into()
+                };
+                if self.cur_is_punct("{") {
+                    let fields = self.parse_struct_body_fields();
+                    if !self.expect_token_text(";") {
+                        self.err_custom_here("E2001", "missing ';' after struct/union definition");
+                    }
+                    items.push(Item::StructDef { kind, name, fields });
+                    continue;
+                } else {
+                    // 不是定义（可能是类型在声明里用），回退交给普通声明路径
+                    self.restore(mark);
+                }
+            }
+
+            // 3) enum 定义：enum Color { RED, GREEN, ... };
+            if self.cur_is_kw("enum") {
+                let mark = self.save();
+                self.bump(); // 'enum'
+                let name = if self.cur_is(&TokenType::Identifier) {
+                    self.bump().unwrap().text().to_string()
+                } else {
+                    self.err_custom_here("E5202", "expected enum tag name");
+                    "_anon".into()
+                };
+                if self.cur_is_punct("{") {
+                    let item = self.parse_enum_def(name);
+                    items.push(item);
+                    continue;
+                } else {
+                    // 不是定义（只是类型说明符），回退交给普通声明路径
+                    self.restore(mark);
+                }
+            }
+
+            // 4) 正常的函数 / 全局变量声明
             if self.peek_type_start() {
                 let base_ty = match self.parse_decl_base_type() {
                     Some(t) => t,
@@ -458,6 +531,121 @@ impl Parser {
             self.err_custom_here("E2001", "missing ';' after typedef");
         }
         let _ = base_ty; // 当前不使用真实底层类型，仅记录名字
+    }
+
+    /* ===================== struct/union/enum 定义体解析 ===================== */
+
+    fn parse_struct_body_fields(&mut self) -> Vec<StructField> {
+        // 当前在 struct/union 名称之后，下一 token 为 '{'
+        self.expect_punct("{");
+        let mut fields = Vec::new();
+
+        loop {
+            self.skip_trivia();
+            if self.at_end() {
+                self.err_custom_here("E3007", "unclosed struct/union body, expected '}' before EOF");
+                break;
+            }
+            if self.cur_is_punct("}") {
+                self.bump();
+                break;
+            }
+
+            // 结构体字段：<type> declarator-list ';'
+            if !self.peek_type_start() {
+                self.err_custom_here("E5300", "expected field type in struct/union");
+                self.sync();
+                continue;
+            }
+
+            let base_ty = self.parse_decl_base_type().unwrap_or_else(|| "int".to_string());
+
+            loop {
+                let ptr = self.parse_pointer_stars();
+                if !self.cur_is(&TokenType::Identifier) {
+                    self.err_custom_here("E5301", "expected field name in struct/union");
+                    break;
+                }
+                let name_tok = self.bump().unwrap();
+                let name = name_tok.text().to_string();
+                let dims = self.parse_array_dims_multi();
+
+                // C 里不允许字段带初始化，这里如果出现就报错并解析掉
+                if self.cur_is_op("=") {
+                    self.err_custom_here("E5302", "field declaration cannot have an initializer");
+                    self.bump();
+                    let _ = self.parse_initializer();
+                }
+
+                fields.push(StructField {
+                    ty: base_ty.clone(),
+                    ptr,
+                    name,
+                    array_dims: dims,
+                });
+
+                if self.cur_is_punct(",") {
+                    self.bump();
+                    continue; // 同一行多个字段
+                } else {
+                    break;
+                }
+            }
+
+            if !self.expect_token_text(";") {
+                self.err_custom_here("E2001", "missing ';' after struct/union field");
+            }
+        }
+
+        fields
+    }
+
+    fn parse_enum_def(&mut self, name: String) -> Item {
+        self.expect_punct("{");
+        let mut consts = Vec::new();
+
+        loop {
+            self.skip_trivia();
+            if self.at_end() {
+                self.err_custom_here("E3006", "unclosed enum body, expected '}' before EOF");
+                break;
+            }
+            if self.cur_is_punct("}") {
+                self.bump();
+                break;
+            }
+
+            if !self.cur_is(&TokenType::Identifier) {
+                self.err_custom_here("E5401", "expected enumerator name in enum");
+                self.sync();
+                if self.cur_is_punct(",") { self.bump(); }
+                continue;
+            }
+
+            let name_tok = self.bump().unwrap();
+            let cname = name_tok.text().to_string();
+            let value = if self.cur_is_op("=") {
+                self.bump();
+                Some(self.parse_expr())
+            } else {
+                None
+            };
+            consts.push(EnumConst { name: cname, value });
+
+            if self.cur_is_punct(",") {
+                self.bump();
+                if self.cur_is_punct("}") {
+                    // 允许拖尾逗号
+                    continue;
+                }
+            }
+        }
+
+        if !self.expect_token_text(";") {
+            self.err_custom_here("E2001", "missing ';' after enum definition");
+        }
+
+        Item::EnumDef { name, consts }
     }
 
     /* ===================== 指针与数组维度 ===================== */
@@ -989,7 +1177,7 @@ impl Parser {
     }
 }
 
-/* ===================== 打印器（含 Init） ===================== */
+/* ===================== 打印器（含 Init / Struct / Enum） ===================== */
 
 pub fn stringify_items(items: &[Item]) -> String {
     fn indent(n:usize)->String{ "  ".repeat(n) }
@@ -1178,6 +1366,36 @@ pub fn stringify_items(items: &[Item]) -> String {
             Item::Global(g) => {
                 s.push_str("global ");
                 fmt_stmt(g,0,&mut s);
+            }
+            Item::StructDef{kind,name,fields} => {
+                let kind_str = match kind {
+                    StructKind::Struct => "struct",
+                    StructKind::Union  => "union",
+                };
+                s.push_str(&format!("{} {} {{\n", kind_str, name));
+                for f in fields {
+                    s.push_str(&format!(
+                        "  field {}{} {}{}\n",
+                        f.ty,
+                        if f.ptr>0 { format!(" {}", "*".repeat(f.ptr)) } else { "".into() },
+                        f.name,
+                        fmt_dims(&f.array_dims)
+                    ));
+                }
+                s.push_str("}\n");
+            }
+            Item::EnumDef{name,consts} => {
+                s.push_str(&format!("enum {} {{\n", name));
+                for c in consts {
+                    s.push_str("  ");
+                    s.push_str(&c.name);
+                    if let Some(v) = &c.value {
+                        s.push_str(" = ");
+                        fmt_expr(v, 0, &mut s);
+                    }
+                    s.push('\n');
+                }
+                s.push_str("}\n");
             }
         }
     }
