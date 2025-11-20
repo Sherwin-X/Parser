@@ -81,7 +81,7 @@ pub struct Case {
     pub body: Vec<Stmt>,
 }
 
-/* ===== 新增：struct/union/enum 的 AST 节点 ===== */
+/* ===== struct/union/enum 的 AST 节点 ===== */
 
 #[derive(Debug, Clone)]
 pub struct StructField {
@@ -89,6 +89,7 @@ pub struct StructField {
     pub ptr: usize,
     pub name: String,
     pub array_dims: Vec<Option<String>>,
+    pub bit_width: Option<Expr>, // 新增：位域宽度，如 `int flags:3;`
 }
 
 #[derive(Debug, Clone)]
@@ -570,6 +571,14 @@ impl Parser {
                 let name = name_tok.text().to_string();
                 let dims = self.parse_array_dims_multi();
 
+                // 新增：位域宽度 `: expr`
+                let bit_width = if self.cur_is_punct(":") || self.cur_is_op(":") {
+                    self.bump();
+                    Some(self.parse_expr())
+                } else {
+                    None
+                };
+
                 // C 里不允许字段带初始化，这里如果出现就报错并解析掉
                 if self.cur_is_op("=") {
                     self.err_custom_here("E5302", "field declaration cannot have an initializer");
@@ -582,6 +591,7 @@ impl Parser {
                     ptr,
                     name,
                     array_dims: dims,
+                    bit_width,
                 });
 
                 if self.cur_is_punct(",") {
@@ -1374,13 +1384,20 @@ pub fn stringify_items(items: &[Item]) -> String {
                 };
                 s.push_str(&format!("{} {} {{\n", kind_str, name));
                 for f in fields {
-                    s.push_str(&format!(
-                        "  field {}{} {}{}\n",
-                        f.ty,
-                        if f.ptr>0 { format!(" {}", "*".repeat(f.ptr)) } else { "".into() },
-                        f.name,
-                        fmt_dims(&f.array_dims)
-                    ));
+                    s.push_str("  field ");
+                    s.push_str(&f.ty);
+                    if f.ptr>0 {
+                        s.push(' ');
+                        s.push_str(&"*".repeat(f.ptr));
+                    }
+                    s.push(' ');
+                    s.push_str(&f.name);
+                    s.push_str(&fmt_dims(&f.array_dims));
+                    if let Some(bw) = &f.bit_width {
+                        s.push_str(" : ");
+                        fmt_expr(bw, 0, &mut s);
+                    }
+                    s.push('\n');
                 }
                 s.push_str("}\n");
             }
