@@ -561,42 +561,82 @@ impl Parser {
 
             let base_ty = self.parse_decl_base_type().unwrap_or_else(|| "int".to_string());
 
+            // 支持：
+            //   int x;
+            //   int x, y:3;
+            //   int :3, :5;          // 无名位域
+            //   struct Inner;        // 匿名 struct 字段
+            //   struct { ... };      // 内联匿名 struct 字段（上一步已经支持 type 部分）
             loop {
                 let ptr = self.parse_pointer_stars();
-                if !self.cur_is(&TokenType::Identifier) {
-                    self.err_custom_here("E5301", "expected field name in struct/union");
+
+                if self.cur_is(&TokenType::Identifier) {
+                    // 普通具名字段
+                    let name_tok = self.bump().unwrap();
+                    let name = name_tok.text().to_string();
+                    let dims = self.parse_array_dims_multi();
+
+                    // 位域宽度 `: expr`
+                    let bit_width = if self.cur_is_punct(":") || self.cur_is_op(":") {
+                        self.bump();
+                        Some(self.parse_expr())
+                    } else {
+                        None
+                    };
+
+                    // C 里不允许字段带初始化，这里如果出现就报错并解析掉
+                    if self.cur_is_op("=") {
+                        self.err_custom_here("E5302", "field declaration cannot have an initializer");
+                        self.bump();
+                        let _ = self.parse_initializer();
+                    }
+
+                    fields.push(StructField {
+                        ty: base_ty.clone(),
+                        ptr,
+                        name,
+                        array_dims: dims,
+                        bit_width,
+                    });
+                } else if self.cur_is_punct(";") || self.cur_is_punct(":") {
+                    // 无字段名：
+                    //   - struct Inner;
+                    //   - struct { ... };
+                    //   - int :3;
+                    // 语义上我们不做 C 标准的严格限制，只做语法接受。
+                    let name = "<anon>".to_string();
+                    let dims = self.parse_array_dims_multi(); // 理论上不会有，但语法上容忍
+
+                    let bit_width = if self.cur_is_punct(":") || self.cur_is_op(":") {
+                        self.bump();
+                        Some(self.parse_expr())
+                    } else {
+                        None
+                    };
+
+                    if self.cur_is_op("=") {
+                        self.err_custom_here("E5302", "field declaration cannot have an initializer");
+                        self.bump();
+                        let _ = self.parse_initializer();
+                    }
+
+                    fields.push(StructField {
+                        ty: base_ty.clone(),
+                        ptr,
+                        name,
+                        array_dims: dims,
+                        bit_width,
+                    });
+                } else {
+                    // 既不是标识符，也不是立即结束/位域的情况 -> 真正的语法错误
+                    self.err_custom_here("E5301", "expected field name or ';' in struct/union");
                     break;
                 }
-                let name_tok = self.bump().unwrap();
-                let name = name_tok.text().to_string();
-                let dims = self.parse_array_dims_multi();
 
-                // 新增：位域宽度 `: expr`
-                let bit_width = if self.cur_is_punct(":") || self.cur_is_op(":") {
-                    self.bump();
-                    Some(self.parse_expr())
-                } else {
-                    None
-                };
-
-                // C 里不允许字段带初始化，这里如果出现就报错并解析掉
-                if self.cur_is_op("=") {
-                    self.err_custom_here("E5302", "field declaration cannot have an initializer");
-                    self.bump();
-                    let _ = self.parse_initializer();
-                }
-
-                fields.push(StructField {
-                    ty: base_ty.clone(),
-                    ptr,
-                    name,
-                    array_dims: dims,
-                    bit_width,
-                });
-
+                // 同一行多个字段：int x, y:3;
                 if self.cur_is_punct(",") {
                     self.bump();
-                    continue; // 同一行多个字段
+                    continue;
                 } else {
                     break;
                 }
@@ -609,6 +649,7 @@ impl Parser {
 
         fields
     }
+
 
     fn parse_enum_def(&mut self, name: String) -> Item {
         self.expect_punct("{");
