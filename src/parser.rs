@@ -261,6 +261,11 @@ impl Parser {
         )
     }
 
+    // 是否是 struct/union/enum 类型名字（字符串形式）
+    fn is_tag_type_name(name: &str) -> bool {
+        name.starts_with("struct ") || name.starts_with("union ") || name.starts_with("enum ")
+    }
+
     // 当前 token 是否可以开始一个 "类型"（内建组合 / typedef 名 / struct/union/enum 标签类型）
     // 这里要忽略前面的 storage-class / inline 等说明符
     fn peek_type_start(&self) -> bool {
@@ -559,6 +564,10 @@ impl Parser {
                         }
                         items.push(Item::Global(if stmts.len()==1 { stmts.pop().unwrap() } else { Stmt::Block(stmts) }));
                     }
+                } else if self.cur_is_punct(";") && Self::is_tag_type_name(&base_ty) {
+                    // 顶层 tag-only 前向声明：struct Foo; / union Bar; / enum Baz;
+                    self.bump(); // 吃掉 ';'，不生成 Item
+                    continue;
                 } else {
                     self.err_custom_here("E2101", "expected identifier after type");
                 }
@@ -865,6 +874,13 @@ impl Parser {
         };
 
         let first_ptr = self.parse_pointer_stars();
+
+        // 支持块内的 tag-only 声明：struct Foo; / union Bar; / enum Baz;
+        if self.cur_is_punct(";") && Self::is_tag_type_name(&base_ty) {
+            self.bump(); // 吃掉 ';'
+            return Stmt::Empty;
+        }
+
         let name_tok = if self.cur_is(&TokenType::Identifier){
             self.bump().unwrap()
         } else {
