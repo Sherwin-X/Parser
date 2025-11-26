@@ -261,6 +261,12 @@ impl Parser {
         )
     }
 
+    // 指针上的修饰符：const / volatile / restrict
+    fn is_ptr_qualifier_kw(t: &Token) -> bool {
+        if !matches!(t.kind(), TokenType::Keyword) { return false; }
+        matches!(t.text(), "const" | "volatile" | "restrict")
+    }
+
     // 是否是 struct/union/enum 类型名字（字符串形式）
     fn is_tag_type_name(name: &str) -> bool {
         name.starts_with("struct ") || name.starts_with("union ") || name.starts_with("enum ")
@@ -786,8 +792,26 @@ impl Parser {
     /* ===================== 指针与数组维度 ===================== */
 
     fn parse_pointer_stars(&mut self) -> usize {
-        let mut n=0usize;
-        while self.cur_is_op("*") { self.bump(); n+=1; }
+        let mut n = 0usize;
+        while self.cur_is_op("*") {
+            self.bump();
+            n += 1;
+            // 吃掉紧跟在该 * 后面的指针修饰符（const / volatile / restrict）
+            loop {
+                let is_qual = {
+                    if let Some(t) = self.cur() {
+                        Self::is_ptr_qualifier_kw(t)
+                    } else {
+                        false
+                    }
+                };
+                if is_qual {
+                    self.bump();
+                } else {
+                    break;
+                }
+            }
+        }
         n
     }
 
@@ -831,6 +855,7 @@ impl Parser {
         }
         if !self.cur_is_punct(")") { self.err_custom_here("E3001", "unclosed parameter list, expected ')'"); }
         self.expect_punct(")");
+
         v
     }
 
