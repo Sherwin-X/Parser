@@ -55,6 +55,12 @@ pub struct Param {
 }
 
 #[derive(Debug, Clone)]
+pub struct Case {
+    pub label: Option<Expr>, // None = default
+    pub body: Vec<Stmt>,
+}
+
+#[derive(Debug, Clone)]
 pub enum Stmt {
     VarDecl {
         ty: String,
@@ -68,17 +74,13 @@ pub enum Stmt {
     While  { cond: Expr, body: Box<Stmt> },
     For    { init: Option<Box<Stmt>>, cond: Option<Expr>, step: Option<Expr>, body: Box<Stmt> },
     Switch { expr: Expr, cases: Vec<Case> },
+    DoWhile { body: Box<Stmt>, cond: Expr }, // 新增 do-while
+
     Break,
     Continue,
     ExprStmt(Expr),
     Block(Vec<Stmt>),
     Empty,
-}
-
-#[derive(Debug, Clone)]
-pub struct Case {
-    pub label: Option<Expr>, // None = default
-    pub body: Vec<Stmt>,
 }
 
 /* ===== struct/union/enum 的 AST 节点 ===== */
@@ -272,26 +274,22 @@ impl Parser {
         name.starts_with("struct ") || name.starts_with("union ") || name.starts_with("enum ")
     }
 
-    // 当前 token 是否可以开始一个 "类型"（内建组合 / typedef 名 / struct/union/enum 标签类型）
-    // 这里要忽略前面的 storage-class / inline 等说明符
+    // 当前 token 是否可以开始一个 "类型"
     fn peek_type_start(&self) -> bool {
         let mut j = self.i;
         while j < self.tokens.len() {
             let t = &self.tokens[j];
 
-            // 跳过 trivia
             if matches!(t.kind(), TokenType::Whitespace | TokenType::Comment | TokenType::Preprocessor) {
                 j += 1;
                 continue;
             }
 
-            // 跳过存储/函数说明符
             if Self::is_storage_or_func_spec_kw(t) {
                 j += 1;
                 continue;
             }
 
-            // 真正判断类型起始
             if Self::is_builtin_type_kw_token(t) {
                 return true;
             }
@@ -353,9 +351,9 @@ impl Parser {
         }
     }
 
-    // 声明里的「基础类型」（不含 *），可以是内建组合 / typedef 名 / struct/union/enum Tag 或内联匿名定义
+    // 声明里的「基础类型」（不含 *）
     fn parse_decl_base_type(&mut self) -> Option<String> {
-        // 先吃掉前面的存储/函数说明符（static / extern / inline 等）
+        // 先吃掉 storage-class / 函数说明符
         loop {
             if let Some(t) = self.cur() {
                 if Self::is_storage_or_func_spec_kw(t) {
@@ -378,19 +376,17 @@ impl Parser {
                 return Some(name);
             }
         }
-        // 3) struct / union / enum 标签类型 或 内联匿名定义
+        // 3) struct / union / enum
         if self.cur_is_kw("struct") || self.cur_is_kw("union") || self.cur_is_kw("enum") {
             let kw_tok = self.bump().unwrap();
             let kw = kw_tok.text().to_string();
 
-            // 内联/匿名：struct { ... } [name] ...
             if self.cur_is_punct("{") {
                 self.skip_brace_block_in_type();
                 let base = format!("{} <anon>", kw);
                 return Some(base);
             }
 
-            // 正常：struct Tag
             let tag = if self.cur_is(&TokenType::Identifier) {
                 self.bump().unwrap().text().to_string()
             } else {
@@ -402,9 +398,8 @@ impl Parser {
         None
     }
 
-    // 类型名（含 *），用于 cast / sizeof(type) / alignof(type)，也支持内联匿名 struct/union/enum
+    // 类型名（含 *），用于 cast / sizeof(type) / alignof(type)
     fn parse_type_name_full(&mut self) -> Option<CType> {
-        // 1. 尝试内建组合
         let mark = self.save();
         if let Some(specs) = self.parse_builtin_type_keyword_seq() {
             let base = Self::specs_to_string(&specs);
@@ -413,7 +408,6 @@ impl Parser {
         }
         self.restore(mark);
 
-        // 2. 尝试 typedef 名
         if let Some(t) = self.cur() {
             if matches!(t.kind(), TokenType::Identifier) && self.typedefs.contains(t.text()) {
                 let base = t.text().to_string();
@@ -423,7 +417,6 @@ impl Parser {
             }
         }
 
-        // 3. 尝试 struct / union / enum 标签类型 或 内联匿名定义
         if self.cur_is_kw("struct") || self.cur_is_kw("union") || self.cur_is_kw("enum") {
             let kw_tok = self.bump().unwrap();
             let kw = kw_tok.text().to_string();
@@ -457,13 +450,13 @@ impl Parser {
             self.skip_trivia();
             if self.at_end(){ break; }
 
-            // 1) typedef 声明：不会生成 Item，只更新 typedef 集合
+            // typedef
             if self.cur_is_kw("typedef") {
                 self.parse_typedef_decl();
                 continue;
             }
 
-            // 2) struct / union 顶层定义：struct Point { ... };
+            // struct/union 顶层定义
             if self.cur_is_kw("struct") || self.cur_is_kw("union") {
                 let mark = self.save();
                 let kw_tok = self.bump().unwrap();
@@ -486,12 +479,11 @@ impl Parser {
                     items.push(Item::StructDef { kind, name, fields });
                     continue;
                 } else {
-                    // 不是定义（可能是类型在声明里用），回退交给普通声明路径
                     self.restore(mark);
                 }
             }
 
-            // 3) enum 顶层定义：enum Color { RED, GREEN, ... };
+            // enum 顶层定义
             if self.cur_is_kw("enum") {
                 let mark = self.save();
                 self.bump(); // 'enum'
@@ -506,12 +498,11 @@ impl Parser {
                     items.push(item);
                     continue;
                 } else {
-                    // 不是定义（只是类型说明符），回退交给普通声明路径
                     self.restore(mark);
                 }
             }
 
-            // 4) 正常的函数 / 全局变量声明
+            // 函数 / 全局变量
             if self.peek_type_start() {
                 let base_ty = match self.parse_decl_base_type() {
                     Some(t) => t,
@@ -557,7 +548,6 @@ impl Parser {
                         }
                         if !self.expect_token_text(";"){ self.err_custom_here("E2001", "missing ';' after declaration"); }
 
-                        // 形状/容量校验
                         for (_, nm, nm_span, dims, ini) in &decls {
                             if let Some(init) = ini {
                                 self.validate_array_initializer(nm, *nm_span, dims, init);
@@ -571,8 +561,8 @@ impl Parser {
                         items.push(Item::Global(if stmts.len()==1 { stmts.pop().unwrap() } else { Stmt::Block(stmts) }));
                     }
                 } else if self.cur_is_punct(";") && Self::is_tag_type_name(&base_ty) {
-                    // 顶层 tag-only 前向声明：struct Foo; / union Bar; / enum Baz;
-                    self.bump(); // 吃掉 ';'，不生成 Item
+                    // 顶层 tag-only 前向声明
+                    self.bump();
                     continue;
                 } else {
                     self.err_custom_here("E2101", "expected identifier after type");
@@ -590,7 +580,6 @@ impl Parser {
     fn parse_typedef_decl(&mut self) {
         self.expect_kw("typedef");
 
-        // 允许 typedef 前面也写 storage spec（例如很奇怪但语法上不想拒绝）
         let base_ty = match self.parse_decl_base_type() {
             Some(t) => t,
             None => {
@@ -598,9 +587,8 @@ impl Parser {
                 return;
             }
         };
-        let _base_ptr = self.parse_pointer_stars(); // 当前不展开别名里的指针，只解析语法
+        let _base_ptr = self.parse_pointer_stars();
 
-        // typedef int MyInt, *PInt;
         let mut first = true;
         loop {
             if !self.cur_is(&TokenType::Identifier) {
@@ -611,9 +599,8 @@ impl Parser {
             }
             let nm_tok = self.bump().unwrap();
             let nm = nm_tok.text().to_string();
-            let _dims = self.parse_array_dims_multi(); // 语法上接受数组 typedef，但不展开
+            let _dims = self.parse_array_dims_multi();
 
-            // 把别名名字记录到 typedef 符号表
             self.typedefs.insert(nm);
             first = false;
 
@@ -626,13 +613,12 @@ impl Parser {
         if !self.expect_token_text(";") {
             self.err_custom_here("E2001", "missing ';' after typedef");
         }
-        let _ = base_ty; // 当前不使用真实底层类型，仅记录名字
+        let _ = base_ty;
     }
 
     /* ===================== struct/union/enum 定义体解析 ===================== */
 
     fn parse_struct_body_fields(&mut self) -> Vec<StructField> {
-        // 当前在 struct/union 名称之后，下一 token 为 '{'
         self.expect_punct("{");
         let mut fields = Vec::new();
 
@@ -647,7 +633,6 @@ impl Parser {
                 break;
             }
 
-            // 结构体字段：<type> declarator-list ';'
             if !self.peek_type_start() {
                 self.err_custom_here("E5300", "expected field type in struct/union");
                 self.sync();
@@ -656,22 +641,14 @@ impl Parser {
 
             let base_ty = self.parse_decl_base_type().unwrap_or_else(|| "int".to_string());
 
-            // 支持：
-            //   int x;
-            //   int x, y:3;
-            //   int :3, :5;          // 无名位域
-            //   struct Inner field;
-            //   struct { ... } field;
             loop {
                 let ptr = self.parse_pointer_stars();
 
                 if self.cur_is(&TokenType::Identifier) {
-                    // 普通具名字段
                     let name_tok = self.bump().unwrap();
                     let name = name_tok.text().to_string();
                     let dims = self.parse_array_dims_multi();
 
-                    // 位域宽度 `: expr`
                     let bit_width = if self.cur_is_punct(":") || self.cur_is_op(":") {
                         self.bump();
                         Some(self.parse_expr())
@@ -679,7 +656,6 @@ impl Parser {
                         None
                     };
 
-                    // C 里不允许字段带初始化，这里如果出现就报错并解析掉
                     if self.cur_is_op("=") {
                         self.err_custom_here("E5302", "field declaration cannot have an initializer");
                         self.bump();
@@ -694,7 +670,6 @@ impl Parser {
                         bit_width,
                     });
                 } else if self.cur_is_punct(";") || self.cur_is_punct(":") {
-                    // 无字段名（无名位域等）
                     let name = "<anon>".to_string();
                     let dims = self.parse_array_dims_multi();
 
@@ -719,12 +694,10 @@ impl Parser {
                         bit_width,
                     });
                 } else {
-                    // 既不是标识符，也不是立即结束/位域的情况 -> 真正的语法错误
                     self.err_custom_here("E5301", "expected field name or ';' in struct/union");
                     break;
                 }
 
-                // 同一行多个字段：int x, y:3;
                 if self.cur_is_punct(",") {
                     self.bump();
                     continue;
@@ -776,7 +749,6 @@ impl Parser {
             if self.cur_is_punct(",") {
                 self.bump();
                 if self.cur_is_punct("}") {
-                    // 允许拖尾逗号
                     continue;
                 }
             }
@@ -855,7 +827,6 @@ impl Parser {
         }
         if !self.cur_is_punct(")") { self.err_custom_here("E3001", "unclosed parameter list, expected ')'"); }
         self.expect_punct(")");
-
         v
     }
 
@@ -871,6 +842,8 @@ impl Parser {
         if self.cur_is_kw("while"){ return self.parse_while(); }
         if self.cur_is_kw("for"){ return self.parse_for(); }
         if self.cur_is_kw("switch"){ return self.parse_switch(); }
+        if self.cur_is_kw("do"){ return self.parse_do_while(); } // 新增 do-while
+
         if self.cur_is_kw("break"){ self.bump(); if !self.expect_token_text(";"){ self.err_custom_here("E2002","missing ';' after 'break'"); } return Stmt::Break; }
         if self.cur_is_kw("continue"){ self.bump(); if !self.expect_token_text(";"){ self.err_custom_here("E2002","missing ';' after 'continue'"); } return Stmt::Continue; }
         if self.cur_is_punct(";"){ self.bump(); return Stmt::Empty; }
@@ -900,9 +873,8 @@ impl Parser {
 
         let first_ptr = self.parse_pointer_stars();
 
-        // 支持块内的 tag-only 声明：struct Foo; / union Bar; / enum Baz;
         if self.cur_is_punct(";") && Self::is_tag_type_name(&base_ty) {
-            self.bump(); // 吃掉 ';'
+            self.bump();
             return Stmt::Empty;
         }
 
@@ -936,7 +908,6 @@ impl Parser {
 
         if !self.expect_token_text(";") { self.err_custom_here("E2001", "missing ';' after declaration"); }
 
-        // 校验
         for (_, nm, nm_span, dims, ini) in &decls {
             if let Some(init) = ini {
                 self.validate_array_initializer(nm, *nm_span, dims, init);
@@ -975,6 +946,34 @@ impl Parser {
         if !self.expect_token_text(")") { self.err_custom_here("E3001","unclosed condition, expected ')'"); }
         let body=self.parse_stmt();
         Stmt::While{ cond, body: Box::new(body) }
+    }
+
+    fn parse_do_while(&mut self) -> Stmt {
+        // do <stmt> while (expr);
+        self.expect_kw("do");
+        let body = self.parse_stmt();
+
+        if !self.cur_is_kw("while") {
+            self.err_custom_here("E3009", "expected 'while' after 'do' body");
+        } else {
+            self.bump(); // 'while'
+        }
+
+        if !self.expect_token_text("(") {
+            self.err_custom_here("E3010", "missing '(' after 'while' in do-while statement");
+        }
+
+        let cond = self.parse_expr();
+
+        if !self.expect_token_text(")") {
+            self.err_custom_here("E3011", "unclosed condition in do-while, expected ')'");
+        }
+
+        if !self.expect_token_text(";") {
+            self.err_custom_here("E2002", "missing ';' after do-while");
+        }
+
+        Stmt::DoWhile { body: Box::new(body), cond }
     }
 
     fn parse_for(&mut self)->Stmt{
@@ -1020,6 +1019,9 @@ impl Parser {
         loop {
             self.skip_trivia();
             if self.at_end(){ self.err_custom_here("E3003", "unclosed switch, expected '}' before EOF"); break; }
+            if self.cur_is_punct(")") {
+                // 这个分支不会被执行（拼写错误时），保留原逻辑
+            }
             if self.cur_is_punct("}") {
                 if has_label {
                     cases.push(Case{ label: cur_label.take(), body: std::mem::take(&mut cur_body) });
@@ -1070,7 +1072,7 @@ impl Parser {
                     if self.cur_is_punct(",") {
                         self.bump();
                         if self.cur_is_punct(")") || self.cur_is_punct("}") {
-                            break; // 允许拖尾逗号
+                            break;
                         }
                         continue;
                     } else {
@@ -1108,7 +1110,7 @@ impl Parser {
                 if ["=","+=","-=","*=","/=","%=","&=","|=","^="].contains(&op) {
                     let op_str=op.to_string();
                     self.bump();
-                    let rhs=self.parse_assignment(); // 右结合
+                    let rhs=self.parse_assignment();
                     return Expr::Assign{ op: op_str, lhs: Box::new(lhs), rhs: Box::new(rhs) };
                 }
             }
@@ -1159,13 +1161,12 @@ impl Parser {
     }
 
     fn parse_unary(&mut self)->Expr{
-        // sizeof / alignof —— 两种形式：对类型或对表达式
         if self.cur_is_kw("sizeof") || self.cur_is_kw("alignof") {
             let is_align = self.cur_is_kw("alignof");
-            self.bump(); // eat keyword
+            self.bump();
             if self.cur_is_punct("(") {
                 let mark = self.save();
-                self.bump(); // '('
+                self.bump();
                 if let Some(ty) = self.parse_type_name_full() {
                     if self.cur_is_punct(")") {
                         self.bump();
@@ -1176,25 +1177,21 @@ impl Parser {
                         };
                     }
                 }
-                // 回退：不是 (type) 形式，则当作 '(' expr ')' 的 sizeof/alignof
                 self.restore(mark);
             }
-            // 一元运算形式：sizeof unary_expr
             let e = self.parse_unary();
             return if is_align { Expr::AlignofExpr(Box::new(e)) } else { Expr::SizeofExpr(Box::new(e)) };
         }
 
-        // 前缀 ++/--
         if self.cur_is_op("++") { self.bump(); let e=self.parse_unary(); return Expr::PreInc(Box::new(e)); }
         if self.cur_is_op("--") { self.bump(); let e=self.parse_unary(); return Expr::PreDec(Box::new(e)); }
 
-        // cast 或 括号表达式
         if self.cur_is_punct("(") {
             let mark = self.save();
-            self.bump(); // '('
+            self.bump();
             if let Some(ty) = self.parse_type_name_full() {
                 if self.cur_is_punct(")") {
-                    self.bump(); // ')'
+                    self.bump();
                     let e = self.parse_unary();
                     return Expr::Cast { ty, expr: Box::new(e) };
                 }
@@ -1202,7 +1199,6 @@ impl Parser {
             self.restore(mark);
         }
 
-        // 一元 + - ! ~ & *
         if self.cur_is_op("+") || self.cur_is_op("-") || self.cur_is_op("!")
             || self.cur_is_op("~") || self.cur_is_op("&") || self.cur_is_op("*")
         {
@@ -1290,10 +1286,10 @@ impl Parser {
                     if let Ok(v) = s.parse::<usize>() {
                         cap = cap.saturating_mul(v);
                     } else {
-                        return None; // 非整数字面量
+                        return None;
                     }
                 }
-                None => return None, // 不定长
+                None => return None,
             }
         }
         Some(cap)
@@ -1317,7 +1313,7 @@ impl Parser {
 
     fn validate_array_initializer(&mut self, name: &str, name_span: Span, dims: &[Option<String>], init: &Init) {
         if dims.is_empty() {
-            return; // 非数组
+            return;
         }
         let rank = dims.len();
         let (_cnt, depth) = Self::init_count_and_depth(init);
@@ -1453,6 +1449,13 @@ pub fn stringify_items(items: &[Item]) -> String {
                 fmt_expr(cond,d,out);
                 out.push('\n');
                 fmt_stmt(body,d+1,out);
+            }
+            Stmt::DoWhile{body,cond} => {
+                out.push_str(&format!("{}do\n", indent(d)));
+                fmt_stmt(body, d+1, out);
+                out.push_str(&format!("{}while ", indent(d)));
+                fmt_expr(cond, d, out);
+                out.push('\n');
             }
             Stmt::For{init,cond,step,body} => {
                 out.push_str(&format!("{}for (", indent(d)));
