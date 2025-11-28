@@ -74,10 +74,13 @@ pub enum Stmt {
     While  { cond: Expr, body: Box<Stmt> },
     For    { init: Option<Box<Stmt>>, cond: Option<Expr>, step: Option<Expr>, body: Box<Stmt> },
     Switch { expr: Expr, cases: Vec<Case> },
-    DoWhile { body: Box<Stmt>, cond: Expr }, // 新增 do-while
+    DoWhile { body: Box<Stmt>, cond: Expr },
 
     Break,
     Continue,
+    Goto(String),
+    Label { name: String, stmt: Box<Stmt> },
+
     ExprStmt(Expr),
     Block(Vec<Stmt>),
     Empty,
@@ -835,6 +838,20 @@ impl Parser {
     fn parse_stmt(&mut self)->Stmt{
         self.skip_trivia();
         if self.at_end(){ return Stmt::Empty; }
+
+        // label: 形式 —— 在任何关键字检查前优先匹配
+        if self.cur_is(&TokenType::Identifier) {
+            if let Some(next) = self.tokens.get(self.i + 1) {
+                if matches!(next.kind(), TokenType::Punctuation) && next.text() == ":" {
+                    let name_tok = self.bump().unwrap();
+                    let name = name_tok.text().to_string();
+                    self.expect_token_text(":");
+                    let inner = self.parse_stmt();
+                    return Stmt::Label { name, stmt: Box::new(inner) };
+                }
+            }
+        }
+
         if self.cur_is_punct("{"){ return self.parse_block(); }
         if self.peek_type_start(){ return self.parse_var_decl_stmt(); }
         if self.cur_is_kw("return"){ return self.parse_return(); }
@@ -842,7 +859,8 @@ impl Parser {
         if self.cur_is_kw("while"){ return self.parse_while(); }
         if self.cur_is_kw("for"){ return self.parse_for(); }
         if self.cur_is_kw("switch"){ return self.parse_switch(); }
-        if self.cur_is_kw("do"){ return self.parse_do_while(); } // 新增 do-while
+        if self.cur_is_kw("do"){ return self.parse_do_while(); }
+        if self.cur_is_kw("goto"){ return self.parse_goto(); }
 
         if self.cur_is_kw("break"){ self.bump(); if !self.expect_token_text(";"){ self.err_custom_here("E2002","missing ';' after 'break'"); } return Stmt::Break; }
         if self.cur_is_kw("continue"){ self.bump(); if !self.expect_token_text(";"){ self.err_custom_here("E2002","missing ';' after 'continue'"); } return Stmt::Continue; }
@@ -949,14 +967,13 @@ impl Parser {
     }
 
     fn parse_do_while(&mut self) -> Stmt {
-        // do <stmt> while (expr);
         self.expect_kw("do");
         let body = self.parse_stmt();
 
         if !self.cur_is_kw("while") {
             self.err_custom_here("E3009", "expected 'while' after 'do' body");
         } else {
-            self.bump(); // 'while'
+            self.bump();
         }
 
         if !self.expect_token_text("(") {
@@ -974,6 +991,20 @@ impl Parser {
         }
 
         Stmt::DoWhile { body: Box::new(body), cond }
+    }
+
+    fn parse_goto(&mut self) -> Stmt {
+        self.expect_kw("goto");
+        let name = if self.cur_is(&TokenType::Identifier) {
+            self.bump().unwrap().text().to_string()
+        } else {
+            self.err_custom_here("E2601", "expected label name after 'goto'");
+            "_".into()
+        };
+        if !self.expect_token_text(";") {
+            self.err_custom_here("E2002", "missing ';' after 'goto'");
+        }
+        Stmt::Goto(name)
     }
 
     fn parse_for(&mut self)->Stmt{
@@ -1019,9 +1050,6 @@ impl Parser {
         loop {
             self.skip_trivia();
             if self.at_end(){ self.err_custom_here("E3003", "unclosed switch, expected '}' before EOF"); break; }
-            if self.cur_is_punct(")") {
-                // 这个分支不会被执行（拼写错误时），保留原逻辑
-            }
             if self.cur_is_punct("}") {
                 if has_label {
                     cases.push(Case{ label: cur_label.take(), body: std::mem::take(&mut cur_body) });
@@ -1487,6 +1515,13 @@ pub fn stringify_items(items: &[Item]) -> String {
             }
             Stmt::Break => { out.push_str(&format!("{}break\n", indent(d))); }
             Stmt::Continue => { out.push_str(&format!("{}continue\n", indent(d))); }
+            Stmt::Goto(name) => {
+                out.push_str(&format!("{}goto {}\n", indent(d), name));
+            }
+            Stmt::Label{name, stmt} => {
+                out.push_str(&format!("{}label {}:\n", indent(d), name));
+                fmt_stmt(stmt, d+1, out);
+            }
             Stmt::ExprStmt(e) => {
                 out.push_str(&format!("{}expr ", indent(d)));
                 fmt_expr(e,d,out);
