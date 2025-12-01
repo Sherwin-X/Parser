@@ -78,8 +78,8 @@ pub enum Stmt {
 
     Break,
     Continue,
-    Goto(String),
-    Label { name: String, stmt: Box<Stmt> },
+    Goto { name: String, span: Span },
+    Label { name: String, span: Span, stmt: Box<Stmt> },
 
     ExprStmt(Expr),
     Block(Vec<Stmt>),
@@ -575,6 +575,10 @@ impl Parser {
                 items.push(Item::Global(s));
             }
         }
+
+        // 解析完所有 item 后，做一次 goto/label 检查
+        self.check_labels_and_gotos(&items);
+
         items
     }
 
@@ -845,9 +849,10 @@ impl Parser {
                 if matches!(next.kind(), TokenType::Punctuation) && next.text() == ":" {
                     let name_tok = self.bump().unwrap();
                     let name = name_tok.text().to_string();
+                    let span = name_tok.span();
                     self.expect_token_text(":");
                     let inner = self.parse_stmt();
-                    return Stmt::Label { name, stmt: Box::new(inner) };
+                    return Stmt::Label { name, span, stmt: Box::new(inner) };
                 }
             }
         }
@@ -995,16 +1000,18 @@ impl Parser {
 
     fn parse_goto(&mut self) -> Stmt {
         self.expect_kw("goto");
-        let name = if self.cur_is(&TokenType::Identifier) {
-            self.bump().unwrap().text().to_string()
+        let (name, span) = if self.cur_is(&TokenType::Identifier) {
+            let tok = self.bump().unwrap();
+            (tok.text().to_string(), tok.span())
         } else {
+            let sp = self.cur_span();
             self.err_custom_here("E2601", "expected label name after 'goto'");
-            "_".into()
+            ("_".into(), sp)
         };
         if !self.expect_token_text(";") {
             self.err_custom_here("E2002", "missing ';' after 'goto'");
         }
-        Stmt::Goto(name)
+        Stmt::Goto { name, span }
     }
 
     fn parse_for(&mut self)->Stmt{
@@ -1366,6 +1373,88 @@ impl Parser {
             }
         }
     }
+
+    /* ============ goto / label 一致性检查 ============ */
+
+    fn check_labels_and_gotos(&mut self, items: &[Item]) {
+        for it in items {
+            if let Item::Function { body, .. } = it {
+                let mut labels: Vec<(String, Span)> = Vec::new();
+                let mut gotos: Vec<(String, Span)> = Vec::new();
+                self.collect_labels_and_gotos_stmt(body, &mut labels, &mut gotos);
+
+                for (gname, gspan) in gotos {
+                    if !labels.iter().any(|(lname, _)| lname == &gname) {
+                        self.err_custom_span(
+                            "E2602",
+                            format!("goto target label '{}' not defined in this function", gname),
+                            gspan,
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    fn collect_labels_and_gotos_stmt(
+        &mut self,
+        stmt: &Stmt,
+        labels: &mut Vec<(String, Span)>,
+        gotos: &mut Vec<(String, Span)>,
+    ) {
+        match stmt {
+            Stmt::Label { name, span, stmt } => {
+                if labels.iter().any(|(n, _)| n == name) {
+                    self.err_custom_span(
+                        "E2603",
+                        format!("duplicate label '{}'", name),
+                        *span,
+                    );
+                }
+                labels.push((name.clone(), *span));
+                self.collect_labels_and_gotos_stmt(stmt, labels, gotos);
+            }
+            Stmt::Goto { name, span } => {
+                gotos.push((name.clone(), *span));
+            }
+            Stmt::Block(stmts) => {
+                for s in stmts {
+                    self.collect_labels_and_gotos_stmt(s, labels, gotos);
+                }
+            }
+            Stmt::If { then_branch, else_branch, .. } => {
+                self.collect_labels_and_gotos_stmt(then_branch, labels, gotos);
+                if let Some(e) = else_branch {
+                    self.collect_labels_and_gotos_stmt(e, labels, gotos);
+                }
+            }
+            Stmt::While { body, .. } => {
+                self.collect_labels_and_gotos_stmt(body, labels, gotos);
+            }
+            Stmt::DoWhile { body, .. } => {
+                self.collect_labels_and_gotos_stmt(body, labels, gotos);
+            }
+            Stmt::For { init, body, .. } => {
+                if let Some(i) = init {
+                    self.collect_labels_and_gotos_stmt(i, labels, gotos);
+                }
+                self.collect_labels_and_gotos_stmt(body, labels, gotos);
+            }
+            Stmt::Switch { cases, .. } => {
+                for c in cases {
+                    for s in &c.body {
+                        self.collect_labels_and_gotos_stmt(s, labels, gotos);
+                    }
+                }
+            }
+            Stmt::VarDecl { .. }
+            | Stmt::Return(_)
+            | Stmt::Break
+            | Stmt::Continue
+            | Stmt::ExprStmt(_)
+            | Stmt::Empty => {}
+        }
+    }
 }
 
 /* ===================== 打印器（含 Init / Struct / Enum） ===================== */
@@ -1515,10 +1604,10 @@ pub fn stringify_items(items: &[Item]) -> String {
             }
             Stmt::Break => { out.push_str(&format!("{}break\n", indent(d))); }
             Stmt::Continue => { out.push_str(&format!("{}continue\n", indent(d))); }
-            Stmt::Goto(name) => {
+            Stmt::Goto{name, ..} => {
                 out.push_str(&format!("{}goto {}\n", indent(d), name));
             }
-            Stmt::Label{name, stmt} => {
+            Stmt::Label{name, stmt, ..} => {
                 out.push_str(&format!("{}label {}:\n", indent(d), name));
                 fmt_stmt(stmt, d+1, out);
             }
