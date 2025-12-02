@@ -76,8 +76,8 @@ pub enum Stmt {
     Switch { expr: Expr, cases: Vec<Case> },
     DoWhile { body: Box<Stmt>, cond: Expr },
 
-    Break,
-    Continue,
+    Break(Span),
+    Continue(Span),
     Goto { name: String, span: Span },
     Label { name: String, span: Span, stmt: Box<Stmt> },
 
@@ -576,8 +576,9 @@ impl Parser {
             }
         }
 
-        // 解析完所有 item 后，做一次 goto/label 检查
+        // 解析完所有 item 后，做一些简单语义检查
         self.check_labels_and_gotos(&items);
+        self.check_loops_and_breaks(&items);
 
         items
     }
@@ -867,8 +868,18 @@ impl Parser {
         if self.cur_is_kw("do"){ return self.parse_do_while(); }
         if self.cur_is_kw("goto"){ return self.parse_goto(); }
 
-        if self.cur_is_kw("break"){ self.bump(); if !self.expect_token_text(";"){ self.err_custom_here("E2002","missing ';' after 'break'"); } return Stmt::Break; }
-        if self.cur_is_kw("continue"){ self.bump(); if !self.expect_token_text(";"){ self.err_custom_here("E2002","missing ';' after 'continue'"); } return Stmt::Continue; }
+        if self.cur_is_kw("break"){
+            let tok = self.bump().unwrap();
+            let span = tok.span();
+            if !self.expect_token_text(";"){ self.err_custom_here("E2002","missing ';' after 'break'"); }
+            return Stmt::Break(span);
+        }
+        if self.cur_is_kw("continue"){
+            let tok = self.bump().unwrap();
+            let span = tok.span();
+            if !self.expect_token_text(";"){ self.err_custom_here("E2002","missing ';' after 'continue'"); }
+            return Stmt::Continue(span);
+        }
         if self.cur_is_punct(";"){ self.bump(); return Stmt::Empty; }
         self.parse_expr_stmt()
     }
@@ -1449,8 +1460,79 @@ impl Parser {
             }
             Stmt::VarDecl { .. }
             | Stmt::Return(_)
-            | Stmt::Break
-            | Stmt::Continue
+            | Stmt::Break(_)
+            | Stmt::Continue(_)
+            | Stmt::ExprStmt(_)
+            | Stmt::Empty => {}
+        }
+    }
+
+    /* ============ break/continue 上下文检查 ============ */
+
+    fn check_loops_and_breaks(&mut self, items: &[Item]) {
+        for it in items {
+            if let Item::Function { body, .. } = it {
+                self.walk_loops_in_stmt(body, 0, 0);
+            }
+        }
+    }
+
+    fn walk_loops_in_stmt(&mut self, stmt: &Stmt, loop_depth: usize, switch_depth: usize) {
+        match stmt {
+            Stmt::Break(span) => {
+                if loop_depth == 0 && switch_depth == 0 {
+                    self.err_custom_span(
+                        "E2701",
+                        "break statement not within loop or switch".to_string(),
+                        *span,
+                    );
+                }
+            }
+            Stmt::Continue(span) => {
+                if loop_depth == 0 {
+                    self.err_custom_span(
+                        "E2702",
+                        "continue statement not within loop".to_string(),
+                        *span,
+                    );
+                }
+            }
+            Stmt::While { body, .. } => {
+                self.walk_loops_in_stmt(body, loop_depth + 1, switch_depth);
+            }
+            Stmt::DoWhile { body, .. } => {
+                self.walk_loops_in_stmt(body, loop_depth + 1, switch_depth);
+            }
+            Stmt::For { init, body, .. } => {
+                if let Some(i) = init {
+                    self.walk_loops_in_stmt(i, loop_depth, switch_depth);
+                }
+                self.walk_loops_in_stmt(body, loop_depth + 1, switch_depth);
+            }
+            Stmt::Switch { cases, .. } => {
+                for c in cases {
+                    for s in &c.body {
+                        self.walk_loops_in_stmt(s, loop_depth, switch_depth + 1);
+                    }
+                }
+            }
+            Stmt::If { then_branch, else_branch, .. } => {
+                self.walk_loops_in_stmt(then_branch, loop_depth, switch_depth);
+                if let Some(e) = else_branch {
+                    self.walk_loops_in_stmt(e, loop_depth, switch_depth);
+                }
+            }
+            Stmt::Block(stmts) => {
+                for s in stmts {
+                    self.walk_loops_in_stmt(s, loop_depth, switch_depth);
+                }
+            }
+            Stmt::Label { stmt, .. } => {
+                self.walk_loops_in_stmt(stmt, loop_depth, switch_depth);
+            }
+            Stmt::VarDecl { .. }
+            | Stmt::Return(_)
+            | Stmt::Goto { .. }
             | Stmt::ExprStmt(_)
             | Stmt::Empty => {}
         }
@@ -1602,8 +1684,12 @@ pub fn stringify_items(items: &[Item]) -> String {
                 }
                 out.push_str(&format!("{}}}\n", indent(d)));
             }
-            Stmt::Break => { out.push_str(&format!("{}break\n", indent(d))); }
-            Stmt::Continue => { out.push_str(&format!("{}continue\n", indent(d))); }
+            Stmt::Break(_) => {
+                out.push_str(&format!("{}break\n", indent(d)));
+            }
+            Stmt::Continue(_) => {
+                out.push_str(&format!("{}continue\n", indent(d)));
+            }
             Stmt::Goto{name, ..} => {
                 out.push_str(&format!("{}goto {}\n", indent(d), name));
             }
