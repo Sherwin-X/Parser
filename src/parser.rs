@@ -69,7 +69,7 @@ pub enum Stmt {
         array_dims: Vec<Option<String>>,
         init: Option<Init>,
     },
-    Return(Option<Expr>),
+    Return { value: Option<Expr>, span: Span },
     If     { cond: Expr, then_branch: Box<Stmt>, else_branch: Option<Box<Stmt>> },
     While  { cond: Expr, body: Box<Stmt> },
     For    { init: Option<Box<Stmt>>, cond: Option<Expr>, step: Option<Expr>, body: Box<Stmt> },
@@ -579,6 +579,7 @@ impl Parser {
         // 解析完所有 item 后，做一些简单语义检查
         self.check_labels_and_gotos(&items);
         self.check_loops_and_breaks(&items);
+        self.check_function_returns(&items);
 
         items
     }
@@ -956,11 +957,22 @@ impl Parser {
     }
 
     fn parse_return(&mut self)->Stmt{
-        self.expect_kw("return");
-        if self.cur_is_punct(";"){ self.bump(); return Stmt::Return(None); }
-        let e=self.parse_expr();
+        // 手动拿到 return 的 span
+        let tok = if self.cur_is_kw("return") {
+            self.bump().unwrap()
+        } else {
+            self.err_custom_here("E2500", "expected 'return'");
+            self.bump().unwrap_or_else(|| self.tokens[self.i.saturating_sub(1)].clone())
+        };
+        let span = tok.span();
+
+        if self.cur_is_punct(";"){
+            self.bump();
+            return Stmt::Return { value: None, span };
+        }
+        let e = self.parse_expr();
         if !self.expect_token_text(";") { self.err_custom_here("E2002", "missing ';' after return value"); }
-        Stmt::Return(Some(e))
+        Stmt::Return { value: Some(e), span }
     }
 
     fn parse_if(&mut self)->Stmt{
@@ -1459,7 +1471,7 @@ impl Parser {
                 }
             }
             Stmt::VarDecl { .. }
-            | Stmt::Return(_)
+            | Stmt::Return { .. }
             | Stmt::Break(_)
             | Stmt::Continue(_)
             | Stmt::ExprStmt(_)
@@ -1531,7 +1543,81 @@ impl Parser {
                 self.walk_loops_in_stmt(stmt, loop_depth, switch_depth);
             }
             Stmt::VarDecl { .. }
-            | Stmt::Return(_)
+            | Stmt::Return { .. }
+            | Stmt::Goto { .. }
+            | Stmt::ExprStmt(_)
+            | Stmt::Empty => {}
+        }
+    }
+
+    /* ============ return 语句简单类型检查 ============ */
+
+    fn check_function_returns(&mut self, items: &[Item]) {
+        for it in items {
+            if let Item::Function { ret, ret_ptr, body, .. } = it {
+                let is_void = *ret_ptr == 0 && ret.split_whitespace().any(|w| w == "void");
+                self.check_returns_in_stmt(body, is_void);
+            }
+        }
+    }
+
+    fn check_returns_in_stmt(&mut self, stmt: &Stmt, is_void: bool) {
+        match stmt {
+            Stmt::Return { value, span } => {
+                match (is_void, value.is_some()) {
+                    (true, true) => {
+                        self.err_custom_span(
+                            "E2801",
+                            "void function should not return a value".to_string(),
+                            *span,
+                        );
+                    }
+                    (false, false) => {
+                        self.err_custom_span(
+                            "E2802",
+                            "non-void function should return a value".to_string(),
+                            *span,
+                        );
+                    }
+                    _ => {}
+                }
+            }
+            Stmt::If { then_branch, else_branch, .. } => {
+                self.check_returns_in_stmt(then_branch, is_void);
+                if let Some(e) = else_branch {
+                    self.check_returns_in_stmt(e, is_void);
+                }
+            }
+            Stmt::While { body, .. } => {
+                self.check_returns_in_stmt(body, is_void);
+            }
+            Stmt::DoWhile { body, .. } => {
+                self.check_returns_in_stmt(body, is_void);
+            }
+            Stmt::For { init, body, .. } => {
+                if let Some(i) = init {
+                    self.check_returns_in_stmt(i, is_void);
+                }
+                self.check_returns_in_stmt(body, is_void);
+            }
+            Stmt::Switch { cases, .. } => {
+                for c in cases {
+                    for s in &c.body {
+                        self.check_returns_in_stmt(s, is_void);
+                    }
+                }
+            }
+            Stmt::Block(stmts) => {
+                for s in stmts {
+                    self.check_returns_in_stmt(s, is_void);
+                }
+            }
+            Stmt::Label { stmt, .. } => {
+                self.check_returns_in_stmt(stmt, is_void);
+            }
+            Stmt::VarDecl { .. }
+            | Stmt::Break(_)
+            | Stmt::Continue(_)
             | Stmt::Goto { .. }
             | Stmt::ExprStmt(_)
             | Stmt::Empty => {}
@@ -1628,9 +1714,9 @@ pub fn stringify_items(items: &[Item]) -> String {
             Stmt::VarDecl{ty,ptr,name,array_dims,init} => {
                 fmt_decl_line("decl", ty, *ptr, name, array_dims, init, d, out);
             }
-            Stmt::Return(e) => {
+            Stmt::Return { value, .. } => {
                 out.push_str(&format!("{}return", indent(d)));
-                if let Some(e)=e{ out.push(' '); fmt_expr(e,d,out);}
+                if let Some(e)=value{ out.push(' '); fmt_expr(e,d,out);}
                 out.push('\n');
             }
             Stmt::If{cond,then_branch,else_branch} => {
