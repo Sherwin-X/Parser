@@ -111,7 +111,14 @@ pub struct EnumConst {
 
 #[derive(Debug, Clone)]
 pub enum Item {
-    Function { ret: String, ret_ptr: usize, name: String, params: Vec<Param>, body: Stmt },
+    Function {
+        ret: String,
+        ret_ptr: usize,
+        name: String,
+        name_span: Span,
+        params: Vec<Param>,
+        body: Stmt,
+    },
     Global(Stmt),
     StructDef { kind: StructKind, name: String, fields: Vec<StructField> },
     EnumDef   { name: String, consts: Vec<EnumConst> },
@@ -529,7 +536,7 @@ impl Parser {
                             self.err_custom_here("E2003", "function must have a body");
                             Stmt::Empty
                         };
-                        items.push(Item::Function{ ret: base_ty, ret_ptr, name, params, body });
+                        items.push(Item::Function{ ret: base_ty, ret_ptr, name, name_span, params, body });
                     } else {
                         // 全局变量声明
                         let first_dims = self.parse_array_dims_multi();
@@ -1554,9 +1561,19 @@ impl Parser {
 
     fn check_function_returns(&mut self, items: &[Item]) {
         for it in items {
-            if let Item::Function { ret, ret_ptr, body, .. } = it {
+            if let Item::Function { ret, ret_ptr, body, name_span, .. } = it {
                 let is_void = *ret_ptr == 0 && ret.split_whitespace().any(|w| w == "void");
                 self.check_returns_in_stmt(body, is_void);
+                if !is_void {
+                    let has_val = self.has_value_return(body);
+                    if !has_val {
+                        self.err_custom_span(
+                            "E2803",
+                            "non-void function may reach end without returning a value".to_string(),
+                            *name_span,
+                        );
+                    }
+                }
             }
         }
     }
@@ -1621,6 +1638,47 @@ impl Parser {
             | Stmt::Goto { .. }
             | Stmt::ExprStmt(_)
             | Stmt::Empty => {}
+        }
+    }
+
+    fn has_value_return(&self, stmt: &Stmt) -> bool {
+        match stmt {
+            Stmt::Return { value, .. } => value.is_some(),
+            Stmt::If { then_branch, else_branch, .. } => {
+                self.has_value_return(then_branch)
+                    || else_branch.as_ref().map_or(false, |e| self.has_value_return(e))
+            }
+            Stmt::While { body, .. } => self.has_value_return(body),
+            Stmt::DoWhile { body, .. } => self.has_value_return(body),
+            Stmt::For { init, body, .. } => {
+                init.as_ref().map_or(false, |i| self.has_value_return(i))
+                    || self.has_value_return(body)
+            }
+            Stmt::Switch { cases, .. } => {
+                for c in cases {
+                    for s in &c.body {
+                        if self.has_value_return(s) {
+                            return true;
+                        }
+                    }
+                }
+                false
+            }
+            Stmt::Block(stmts) => {
+                for s in stmts {
+                    if self.has_value_return(s) {
+                        return true;
+                    }
+                }
+                false
+            }
+            Stmt::Label { stmt, .. } => self.has_value_return(stmt),
+            Stmt::VarDecl { .. }
+            | Stmt::Break(_)
+            | Stmt::Continue(_)
+            | Stmt::Goto { .. }
+            | Stmt::ExprStmt(_)
+            | Stmt::Empty => false,
         }
     }
 }
@@ -1800,7 +1858,7 @@ pub fn stringify_items(items: &[Item]) -> String {
     let mut s=String::new();
     for it in items {
         match it {
-            Item::Function{ret,ret_ptr,name,params,body} => {
+            Item::Function{ret,ret_ptr,name,name_span:_,params,body} => {
                 s.push_str(&format!(
                     "fn {}{} {}(",
                     ret,
