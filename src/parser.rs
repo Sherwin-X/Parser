@@ -1,5 +1,5 @@
 use crate::token::{Token, TokenType, Span};
-use std::collections::HashSet;
+use std::collections::{HashSet, HashMap};
 
 /* ===================== AST ===================== */
 
@@ -57,6 +57,7 @@ pub struct Param {
 #[derive(Debug, Clone)]
 pub struct Case {
     pub label: Option<Expr>, // None = default
+    pub span: Span,          // 'case' 或 'default' 的位置
     pub body: Vec<Stmt>,
 }
 
@@ -587,6 +588,7 @@ impl Parser {
         self.check_labels_and_gotos(&items);
         self.check_loops_and_breaks(&items);
         self.check_function_returns(&items);
+        self.check_switch_cases(&items);
 
         items
     }
@@ -1082,6 +1084,7 @@ impl Parser {
         let mut cases: Vec<Case> = vec![];
         let mut cur_body: Vec<Stmt> = vec![];
         let mut cur_label: Option<Expr> = None;
+        let mut cur_span: Option<Span> = None;
         let mut has_label = false;
 
         loop {
@@ -1089,26 +1092,41 @@ impl Parser {
             if self.at_end(){ self.err_custom_here("E3003", "unclosed switch, expected '}' before EOF"); break; }
             if self.cur_is_punct("}") {
                 if has_label {
-                    cases.push(Case{ label: cur_label.take(), body: std::mem::take(&mut cur_body) });
+                    let span = cur_span.unwrap_or_else(|| self.cur_span());
+                    cases.push(Case {
+                        label: cur_label.take(),
+                        span,
+                        body: std::mem::take(&mut cur_body),
+                    });
                 }
                 self.bump();
                 break;
             }
             if self.cur_is_kw("case") || self.cur_is_kw("default") {
                 if has_label {
-                    cases.push(Case{ label: cur_label.take(), body: std::mem::take(&mut cur_body) });
+                    let span = cur_span.unwrap_or_else(|| self.cur_span());
+                    cases.push(Case {
+                        label: cur_label.take(),
+                        span,
+                        body: std::mem::take(&mut cur_body),
+                    });
                     has_label = false;
+                    cur_span = None;
                 }
                 if self.cur_is_kw("case") {
-                    self.bump();
+                    let kw_tok = self.bump().unwrap();
+                    let span = kw_tok.span();
                     let v = self.parse_expr();
                     if !self.expect_token_text(":") { self.err_custom_here("E2007","missing ':' after case label"); }
                     cur_label = Some(v);
+                    cur_span = Some(span);
                     has_label = true;
                 } else {
-                    self.bump();
+                    let kw_tok = self.bump().unwrap();
+                    let span = kw_tok.span();
                     if !self.expect_token_text(":") { self.err_custom_here("E2007","missing ':' after default"); }
                     cur_label = None;
+                    cur_span = Some(span);
                     has_label = true;
                 }
                 continue;
@@ -1679,6 +1697,97 @@ impl Parser {
             | Stmt::Goto { .. }
             | Stmt::ExprStmt(_)
             | Stmt::Empty => false,
+        }
+    }
+
+    /* ============ switch case/default 语义检查 ============ */
+
+    fn check_switch_cases(&mut self, items: &[Item]) {
+        for it in items {
+            match it {
+                Item::Function { body, .. } => self.walk_switch_cases(body),
+                Item::Global(stmt) => self.walk_switch_cases(stmt),
+                Item::StructDef { .. } | Item::EnumDef { .. } => {}
+            }
+        }
+    }
+
+    fn walk_switch_cases(&mut self, stmt: &Stmt) {
+        match stmt {
+            Stmt::Switch { cases, .. } => {
+                self.check_one_switch_cases(cases);
+                for c in cases {
+                    for s in &c.body {
+                        self.walk_switch_cases(s);
+                    }
+                }
+            }
+            Stmt::If { then_branch, else_branch, .. } => {
+                self.walk_switch_cases(then_branch);
+                if let Some(e) = else_branch {
+                    self.walk_switch_cases(e);
+                }
+            }
+            Stmt::While { body, .. } => self.walk_switch_cases(body),
+            Stmt::DoWhile { body, .. } => self.walk_switch_cases(body),
+            Stmt::For { init, body, .. } => {
+                if let Some(i) = init {
+                    self.walk_switch_cases(i);
+                }
+                self.walk_switch_cases(body);
+            }
+            Stmt::Block(stmts) => {
+                for s in stmts {
+                    self.walk_switch_cases(s);
+                }
+            }
+            Stmt::Label { stmt, .. } => self.walk_switch_cases(stmt),
+            Stmt::VarDecl { .. }
+            | Stmt::Return { .. }
+            | Stmt::Break(_)
+            | Stmt::Continue(_)
+            | Stmt::Goto { .. }
+            | Stmt::ExprStmt(_)
+            | Stmt::Empty => {}
+        }
+    }
+
+    fn check_one_switch_cases(&mut self, cases: &[Case]) {
+        let mut default_span: Option<Span> = None;
+        let mut seen_cases: HashMap<String, Span> = HashMap::new();
+
+        for c in cases {
+            match &c.label {
+                None => {
+                    if let Some(_) = default_span {
+                        self.err_custom_span(
+                            "E2901",
+                            "duplicate default label in switch".to_string(),
+                            c.span,
+                        );
+                    } else {
+                        default_span = Some(c.span);
+                    }
+                }
+                Some(expr) => {
+                    // 目前只对字面量（int/char/string）做重复检查
+                    let key_opt = match expr {
+                        Expr::Int(v) | Expr::Char(v) | Expr::Str(v) => Some(v.clone()),
+                        _ => None,
+                    };
+                    if let Some(key) = key_opt {
+                        if let Some(_prev) = seen_cases.get(&key) {
+                            self.err_custom_span(
+                                "E2902",
+                                format!("duplicate case label '{}' in switch", key),
+                                c.span,
+                            );
+                        } else {
+                            seen_cases.insert(key, c.span);
+                        }
+                    }
+                }
+            }
         }
     }
 }
