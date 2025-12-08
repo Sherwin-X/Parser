@@ -854,6 +854,41 @@ impl Parser {
         self.skip_trivia();
         if self.at_end(){ return Stmt::Empty; }
 
+        // case/default 出现在 switch 之外
+        if self.cur_is_kw("case") {
+            let span = self.cur_span();
+            self.err_push("E2903", "'case' label not inside switch statement".to_string(), span);
+            // 丢弃这一段直到 ':' / ';' / '}' 或 EOF，避免死循环
+            self.bump(); // 吃掉 'case'
+            while !self.at_end()
+                && !self.cur_is_punct(":")
+                && !self.cur_is_punct(";")
+                && !self.cur_is_punct("}")
+            {
+                self.bump();
+            }
+            if self.cur_is_punct(":") || self.cur_is_punct(";") {
+                self.bump();
+            }
+            return Stmt::Empty;
+        }
+        if self.cur_is_kw("default") {
+            let span = self.cur_span();
+            self.err_push("E2904", "'default' label not inside switch statement".to_string(), span);
+            self.bump(); // 吃掉 'default'
+            while !self.at_end()
+                && !self.cur_is_punct(":")
+                && !self.cur_is_punct(";")
+                && !self.cur_is_punct("}")
+            {
+                self.bump();
+            }
+            if self.cur_is_punct(":") || self.cur_is_punct(";") {
+                self.bump();
+            }
+            return Stmt::Empty;
+        }
+
         // label: 形式 —— 在任何关键字检查前优先匹配
         if self.cur_is(&TokenType::Identifier) {
             if let Some(next) = self.tokens.get(self.i + 1) {
