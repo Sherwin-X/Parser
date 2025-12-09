@@ -1466,12 +1466,28 @@ impl Parser {
                 let mut gotos: Vec<(String, Span)> = Vec::new();
                 self.collect_labels_and_gotos_stmt(body, &mut labels, &mut gotos);
 
-                for (gname, gspan) in gotos {
-                    if !labels.iter().any(|(lname, _)| lname == &gname) {
+                // 1) 每个 goto 的目标必须存在
+                for (gname, gspan) in &gotos {
+                    if !labels.iter().any(|(lname, _)| lname == gname) {
                         self.err_custom_span(
                             "E2602",
                             format!("goto target label '{}' not defined in this function", gname),
-                            gspan,
+                            *gspan,
+                        );
+                    }
+                }
+
+                // 2) 每个 label 至少被一个 goto 使用
+                let mut used: HashSet<&str> = HashSet::new();
+                for (gname, _) in &gotos {
+                    used.insert(gname.as_str());
+                }
+                for (lname, lspan) in &labels {
+                    if !used.contains(lname.as_str()) {
+                        self.err_custom_span(
+                            "E2604",
+                            format!("label '{}' declared but never used", lname),
+                            *lspan,
                         );
                     }
                 }
