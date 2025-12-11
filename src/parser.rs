@@ -570,6 +570,7 @@ impl Parser {
         self.check_loops_and_breaks(&items);
         self.check_function_returns(&items);
         self.check_switch_cases(&items);
+        self.check_function_redefinitions(&items);
 
         items
     }
@@ -1885,6 +1886,25 @@ impl Parser {
             | Stmt::VarDecl { .. }
             | Stmt::ExprStmt(_)
             | Stmt::Empty => false,
+        }
+    }
+
+    /* ============ 函数重定义检查 ============ */
+
+    fn check_function_redefinitions(&mut self, items: &[Item]) {
+        let mut seen: HashMap<String, Span> = HashMap::new();
+        for it in items {
+            if let Item::Function { name, name_span, .. } = it {
+                if let Some(_prev_span) = seen.get(name) {
+                    self.err_custom_span(
+                        "E5501",
+                        format!("redefinition of function '{}'", name),
+                        *name_span,
+                    );
+                } else {
+                    seen.insert(name.clone(), *name_span);
+                }
+            }
         }
     }
 }
