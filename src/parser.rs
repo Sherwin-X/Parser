@@ -254,7 +254,6 @@ impl Parser {
 
     /* ===================== 类型关键字 / typedef 辅助 ===================== */
 
-    // 内建类型关键字 + const/volatile 作为基本 type specifier 的一部分
     fn is_builtin_type_kw_token(t: &Token) -> bool {
         if !matches!(t.kind(), TokenType::Keyword) { return false; }
         matches!(
@@ -265,7 +264,6 @@ impl Parser {
         )
     }
 
-    // 存储类别 / 函数说明符：static / extern / auto / register / inline / _Thread_local
     fn is_storage_or_func_spec_kw(t: &Token) -> bool {
         if !matches!(t.kind(), TokenType::Keyword) { return false; }
         matches!(
@@ -274,18 +272,15 @@ impl Parser {
         )
     }
 
-    // 指针上的修饰符：const / volatile / restrict
     fn is_ptr_qualifier_kw(t: &Token) -> bool {
         if !matches!(t.kind(), TokenType::Keyword) { return false; }
         matches!(t.text(), "const" | "volatile" | "restrict")
     }
 
-    // 是否是 struct/union/enum 类型名字（字符串形式）
     fn is_tag_type_name(name: &str) -> bool {
         name.starts_with("struct ") || name.starts_with("union ") || name.starts_with("enum ")
     }
 
-    // 当前 token 是否可以开始一个 "类型"
     fn peek_type_start(&self) -> bool {
         let mut j = self.i;
         while j < self.tokens.len() {
@@ -319,7 +314,6 @@ impl Parser {
         false
     }
 
-    // 解析一串内建类型关键字：例如 "unsigned long int", "const int"
     fn parse_builtin_type_keyword_seq(&mut self) -> Option<Vec<String>> {
         if !self.cur().map(Self::is_builtin_type_kw_token).unwrap_or(false) {
             return None;
@@ -340,7 +334,6 @@ impl Parser {
         specs.join(" ")
     }
 
-    /// 在类型上下文中，跳过一个 `{ ... }` block，用于内联/匿名 struct/union/enum 定义
     fn skip_brace_block_in_type(&mut self) {
         if !self.cur_is_punct("{") {
             return;
@@ -362,9 +355,7 @@ impl Parser {
         }
     }
 
-    // 声明里的「基础类型」（不含 *）
     fn parse_decl_base_type(&mut self) -> Option<String> {
-        // 先吃掉 storage-class / 函数说明符
         loop {
             if let Some(t) = self.cur() {
                 if Self::is_storage_or_func_spec_kw(t) {
@@ -375,11 +366,9 @@ impl Parser {
             break;
         }
 
-        // 1) 内建组合
         if let Some(specs) = self.parse_builtin_type_keyword_seq() {
             return Some(Self::specs_to_string(&specs));
         }
-        // 2) typedef 名
         if let Some(t) = self.cur() {
             if matches!(t.kind(), TokenType::Identifier) && self.typedefs.contains(t.text()) {
                 let name = t.text().to_string();
@@ -387,7 +376,6 @@ impl Parser {
                 return Some(name);
             }
         }
-        // 3) struct / union / enum
         if self.cur_is_kw("struct") || self.cur_is_kw("union") || self.cur_is_kw("enum") {
             let kw_tok = self.bump().unwrap();
             let kw = kw_tok.text().to_string();
@@ -409,7 +397,6 @@ impl Parser {
         None
     }
 
-    // 类型名（含 *），用于 cast / sizeof(type) / alignof(type)
     fn parse_type_name_full(&mut self) -> Option<CType> {
         let mark = self.save();
         if let Some(specs) = self.parse_builtin_type_keyword_seq() {
@@ -461,13 +448,11 @@ impl Parser {
             self.skip_trivia();
             if self.at_end(){ break; }
 
-            // typedef
             if self.cur_is_kw("typedef") {
                 self.parse_typedef_decl();
                 continue;
             }
 
-            // struct/union 顶层定义
             if self.cur_is_kw("struct") || self.cur_is_kw("union") {
                 let mark = self.save();
                 let kw_tok = self.bump().unwrap();
@@ -494,7 +479,6 @@ impl Parser {
                 }
             }
 
-            // enum 顶层定义
             if self.cur_is_kw("enum") {
                 let mark = self.save();
                 self.bump(); // 'enum'
@@ -513,7 +497,6 @@ impl Parser {
                 }
             }
 
-            // 函数 / 全局变量
             if self.peek_type_start() {
                 let base_ty = match self.parse_decl_base_type() {
                     Some(t) => t,
@@ -539,7 +522,6 @@ impl Parser {
                         };
                         items.push(Item::Function{ ret: base_ty, ret_ptr, name, name_span, params, body });
                     } else {
-                        // 全局变量声明
                         let first_dims = self.parse_array_dims_multi();
                         let first_init = if self.cur_is_op("=") { self.bump(); Some(self.parse_initializer()) } else { None };
                         let mut decls: Vec<(usize, String, Span, Vec<Option<String>>, Option<Init>)> =
@@ -572,7 +554,6 @@ impl Parser {
                         items.push(Item::Global(if stmts.len()==1 { stmts.pop().unwrap() } else { Stmt::Block(stmts) }));
                     }
                 } else if self.cur_is_punct(";") && Self::is_tag_type_name(&base_ty) {
-                    // 顶层 tag-only 前向声明
                     self.bump();
                     continue;
                 } else {
@@ -584,7 +565,7 @@ impl Parser {
             }
         }
 
-        // 解析完所有 item 后，做一些简单语义检查
+        // 解析完所有 item 后，做语义检查
         self.check_labels_and_gotos(&items);
         self.check_loops_and_breaks(&items);
         self.check_function_returns(&items);
@@ -735,6 +716,7 @@ impl Parser {
     fn parse_enum_def(&mut self, name: String) -> Item {
         self.expect_punct("{");
         let mut consts = Vec::new();
+        let mut used_names: HashSet<String> = HashSet::new();
 
         loop {
             self.skip_trivia();
@@ -756,6 +738,16 @@ impl Parser {
 
             let name_tok = self.bump().unwrap();
             let cname = name_tok.text().to_string();
+            let cspan = name_tok.span();
+
+            if !used_names.insert(cname.clone()) {
+                self.err_custom_span(
+                    "E5402",
+                    format!("duplicate enumerator name '{}'", cname),
+                    cspan,
+                );
+            }
+
             let value = if self.cur_is_op("=") {
                 self.bump();
                 Some(self.parse_expr())
@@ -786,7 +778,6 @@ impl Parser {
         while self.cur_is_op("*") {
             self.bump();
             n += 1;
-            // 吃掉紧跟在该 * 后面的指针修饰符（const / volatile / restrict）
             loop {
                 let is_qual = {
                     if let Some(t) = self.cur() {
@@ -805,7 +796,6 @@ impl Parser {
         n
     }
 
-    // [ <int>? ] ... 0..N 维
     fn parse_array_dims_multi(&mut self) -> Vec<Option<String>> {
         let mut dims = Vec::new();
         while self.cur_is_punct("[") {
@@ -854,12 +844,10 @@ impl Parser {
         self.skip_trivia();
         if self.at_end(){ return Stmt::Empty; }
 
-        // case/default 出现在 switch 之外
         if self.cur_is_kw("case") {
             let span = self.cur_span();
             self.err_push("E2903", "'case' label not inside switch statement".to_string(), span);
-            // 丢弃这一段直到 ':' / ';' / '}' 或 EOF，避免死循环
-            self.bump(); // 吃掉 'case'
+            self.bump();
             while !self.at_end()
                 && !self.cur_is_punct(":")
                 && !self.cur_is_punct(";")
@@ -875,7 +863,7 @@ impl Parser {
         if self.cur_is_kw("default") {
             let span = self.cur_span();
             self.err_push("E2904", "'default' label not inside switch statement".to_string(), span);
-            self.bump(); // 吃掉 'default'
+            self.bump();
             while !self.at_end()
                 && !self.cur_is_punct(":")
                 && !self.cur_is_punct(";")
@@ -889,7 +877,6 @@ impl Parser {
             return Stmt::Empty;
         }
 
-        // label: 形式 —— 在任何关键字检查前优先匹配
         if self.cur_is(&TokenType::Identifier) {
             if let Some(next) = self.tokens.get(self.i + 1) {
                 if matches!(next.kind(), TokenType::Punctuation) && next.text() == ":" {
@@ -1001,7 +988,6 @@ impl Parser {
     }
 
     fn parse_return(&mut self)->Stmt{
-        // 手动拿到 return 的 span
         let tok = if self.cur_is_kw("return") {
             self.bump().unwrap()
         } else {
@@ -1466,7 +1452,6 @@ impl Parser {
                 let mut gotos: Vec<(String, Span)> = Vec::new();
                 self.collect_labels_and_gotos_stmt(body, &mut labels, &mut gotos);
 
-                // 1) 每个 goto 的目标必须存在
                 for (gname, gspan) in &gotos {
                     if !labels.iter().any(|(lname, _)| lname == gname) {
                         self.err_custom_span(
@@ -1477,7 +1462,6 @@ impl Parser {
                     }
                 }
 
-                // 2) 每个 label 至少被一个 goto 使用
                 let mut used: HashSet<&str> = HashSet::new();
                 for (gname, _) in &gotos {
                     used.insert(gname.as_str());
@@ -1821,7 +1805,6 @@ impl Parser {
                     }
                 }
                 Some(expr) => {
-                    // 目前只对字面量（int/char/string）做重复检查
                     let key_opt = match expr {
                         Expr::Int(v) | Expr::Char(v) | Expr::Str(v) => Some(v.clone()),
                         _ => None,
@@ -1839,6 +1822,69 @@ impl Parser {
                     }
                 }
             }
+        }
+
+        // fallthrough 检查：前一个 case 的最后一条非空语句如果不是“终止”，则认为隐式 fallthrough
+        if cases.len() >= 2 {
+            for i in 0..cases.len() - 1 {
+                let c = &cases[i];
+
+                let mut last_stmt: Option<&Stmt> = None;
+                for st in &c.body {
+                    if matches!(st, Stmt::Empty) {
+                        continue;
+                    }
+                    last_stmt = Some(st);
+                }
+
+                if let Some(last) = last_stmt {
+                    if !self.stmt_definitely_breaks(last) {
+                        self.err_custom_span(
+                            "E2905",
+                            "implicit fallthrough from this case to the next case/default".to_string(),
+                            c.span,
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// 在 switch 的语境里，判断一条语句是否“肯定终止”当前 case：
+    /// 我们认为 break/return/goto/continue 以及某些组合结构是终止的。
+    fn stmt_definitely_breaks(&self, stmt: &Stmt) -> bool {
+        match stmt {
+            Stmt::Break(_)
+            | Stmt::Continue(_)
+            | Stmt::Return { .. }
+            | Stmt::Goto { .. } => true,
+
+            Stmt::Block(stmts) => {
+                if let Some(last) = stmts.iter().rev().find(|s| !matches!(s, Stmt::Empty)) {
+                    self.stmt_definitely_breaks(last)
+                } else {
+                    false
+                }
+            }
+
+            Stmt::If { then_branch, else_branch, .. } => {
+                if let Some(e) = else_branch {
+                    self.stmt_definitely_breaks(then_branch)
+                        && self.stmt_definitely_breaks(e)
+                } else {
+                    false
+                }
+            }
+
+            Stmt::Label { stmt, .. } => self.stmt_definitely_breaks(stmt),
+
+            Stmt::While { .. }
+            | Stmt::DoWhile { .. }
+            | Stmt::For { .. }
+            | Stmt::Switch { .. }
+            | Stmt::VarDecl { .. }
+            | Stmt::ExprStmt(_)
+            | Stmt::Empty => false,
         }
     }
 }
