@@ -571,6 +571,7 @@ impl Parser {
         self.check_function_returns(&items);
         self.check_switch_cases(&items);
         self.check_function_redefinitions(&items);
+        self.check_unreachable(&items); // NEW: 检查 return 之后的不可达代码
 
         items
     }
@@ -1905,6 +1906,98 @@ impl Parser {
                     seen.insert(name.clone(), *name_span);
                 }
             }
+        }
+    }
+
+    /* ============ return 之后不可达代码检查 ============ */
+
+    /// 顶层入口：遍历所有函数体
+    fn check_unreachable(&mut self, items: &[Item]) {
+        for it in items {
+            if let Item::Function { body, .. } = it {
+                self.walk_unreachable_stmt(body);
+            }
+        }
+    }
+
+    /// 在语句树中递归查找 block，并在 block 内做线性扫描
+    fn walk_unreachable_stmt(&mut self, stmt: &Stmt) {
+        match stmt {
+            Stmt::Block(stmts) => {
+                self.walk_unreachable_block(stmts);
+            }
+            Stmt::If { then_branch, else_branch, .. } => {
+                self.walk_unreachable_stmt(then_branch);
+                if let Some(e) = else_branch {
+                    self.walk_unreachable_stmt(e);
+                }
+            }
+            Stmt::While { body, .. } => {
+                self.walk_unreachable_stmt(body);
+            }
+            Stmt::DoWhile { body, .. } => {
+                self.walk_unreachable_stmt(body);
+            }
+            Stmt::For { init, body, .. } => {
+                if let Some(i) = init {
+                    self.walk_unreachable_stmt(i);
+                }
+                self.walk_unreachable_stmt(body);
+            }
+            Stmt::Switch { cases, .. } => {
+                for c in cases {
+                    for s in &c.body {
+                        self.walk_unreachable_stmt(s);
+                    }
+                }
+            }
+            Stmt::Label { stmt, .. } => {
+                self.walk_unreachable_stmt(stmt);
+            }
+            Stmt::VarDecl { .. }
+            | Stmt::Return { .. }
+            | Stmt::Break(_)
+            | Stmt::Continue(_)
+            | Stmt::Goto { .. }
+            | Stmt::ExprStmt(_)
+            | Stmt::Empty => {}
+        }
+    }
+
+    /// 在一个 block 内，按顺序检查：如果某个语句是“函数级别终止”（这里只认 return），
+    /// 而后面还有语句，则认为后面的语句不可达。
+    fn walk_unreachable_block(&mut self, stmts: &[Stmt]) {
+        let len = stmts.len();
+        for i in 0..len {
+            let stmt = &stmts[i];
+            // 先递归里面的 block / 分支
+            self.walk_unreachable_stmt(stmt);
+
+            if self.stmt_definitely_exits_function(stmt) && i + 1 < len {
+                let span = self.stmt_span_for_unreachable(stmt);
+                self.err_custom_span(
+                    "E5601",
+                    "code after this return is unreachable".to_string(),
+                    span,
+                );
+                // 一个 block 报一次就够了，避免噪音
+                break;
+            }
+        }
+    }
+
+    /// 极简版：“是否肯定结束当前函数”的判断
+    /// 目前只认 return，其它 break/continue/goto 不算（以后可以扩展）
+    fn stmt_definitely_exits_function(&self, stmt: &Stmt) -> bool {
+        matches!(stmt, Stmt::Return { .. })
+    }
+
+    /// 为不可达诊断找一个合适的 span。
+    /// 目前只会传入 Return，所以直接返回 return 的 span 即可。
+    fn stmt_span_for_unreachable(&self, stmt: &Stmt) -> Span {
+        match stmt {
+            Stmt::Return { span, .. } => *span,
+            _ => Span { line: 1, col: 1, idx: 0, len: 1 },
         }
     }
 }
