@@ -341,6 +341,57 @@ impl Parser {
         }
     }
 
+    /// 顶层同步：用于 parse_items() 的 panic-mode 恢复。
+    /// 目标：跳到下一个可能的“顶层起始点”，避免卡死在坏 token 上。
+    fn sync_top_level(&mut self) {
+        // 确保至少前进一个 token
+        if !self.at_end() {
+            self.i += 1;
+        }
+
+        while !self.at_end() {
+            self.skip_trivia();
+            if self.at_end() {
+                return;
+            }
+
+            // 常见同步点：分号/右花括号
+            if self.cur_is_punct(";") || self.cur_is_punct("}") {
+                return;
+            }
+
+            // 顶层声明/定义关键字
+            if self.cur_is_kw("typedef")
+                || self.cur_is_kw("struct")
+                || self.cur_is_kw("union")
+                || self.cur_is_kw("enum")
+            {
+                return;
+            }
+
+            // 类型起始（包含 typedef 名）
+            if self.peek_type_start() {
+                return;
+            }
+
+            // 允许的“全局语句”起始（如果你的 parser 支持全局 stmt）
+            if self.cur_is_kw("if")
+                || self.cur_is_kw("for")
+                || self.cur_is_kw("while")
+                || self.cur_is_kw("do")
+                || self.cur_is_kw("switch")
+                || self.cur_is_kw("return")
+                || self.cur_is_kw("break")
+                || self.cur_is_kw("continue")
+                || self.cur_is_kw("goto")
+            {
+                return;
+            }
+
+            self.i += 1;
+        }
+    }
+
     fn skip_trivia(&mut self) {
         while let Some(t) = self.cur() {
             if matches!(
@@ -573,6 +624,8 @@ impl Parser {
                 break;
             }
 
+            let start_i = self.i;
+
             if self.cur_is_kw("typedef") {
                 self.parse_typedef_decl();
                 continue;
@@ -723,6 +776,22 @@ impl Parser {
                 let s = self.parse_stmt();
                 items.push(Item::Global(s));
             }
+
+            // panic-mode：如果本轮没有消费任何 token，说明进入无法前进的错误状态，进行顶层同步恢复
+            if self.i == start_i && !self.at_end() {
+                let sp = self.cur_span();
+                self.err_push(
+                    "E9000",
+                    "parser made no progress at top level; skipping tokens to recover".to_string(),
+                    sp,
+                );
+                self.sync_top_level();
+                // 吃掉同步点上的 ';'，避免下一轮再次卡住
+                if self.cur_is_punct(";") {
+                    self.bump();
+                }
+            }
+
         }
 
         // 解析完所有 item 后，做语义检查
