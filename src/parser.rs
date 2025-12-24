@@ -326,17 +326,26 @@ impl Parser {
 
     // 同步：到分号/右花/右括/右方/逗号/下一 case/default
     fn sync(&mut self) {
+        // Panic-mode recovery inside statements/expressions.
+        // Skip tokens until we reach a reasonable boundary.
         while !self.at_end() {
-            if self.cur_is_punct(";")
-                || self.cur_is_punct("}")
-                || self.cur_is_punct(")")
-                || self.cur_is_punct("]")
-                || self.cur_is_punct(",")
-                || self.cur_is_kw("case")
-                || self.cur_is_kw("default")
-            {
+            // If we've just consumed something and landed on a boundary, decide whether to consume it.
+            if self.cur_is_punct(";") || self.cur_is_punct(",") {
+                // For ';' and ',', consuming helps avoid getting stuck on the same boundary token.
+                self.bump();
                 return;
             }
+            if self.cur_is_punct("}") || self.cur_is_punct(")") || self.cur_is_punct("]") {
+                // Do not consume closing delimiters: let the caller decide how to unwind.
+                return;
+            }
+            if self.cur_is_kw("case") || self.cur_is_kw("default") {
+                // Do not consume labels: switch parser needs to see them.
+                return;
+            }
+            self.i += 1;
+        }
+    }
             self.i += 1;
         }
     }
@@ -344,10 +353,59 @@ impl Parser {
     /// 顶层同步：用于 parse_items() 的 panic-mode 恢复。
     /// 目标：跳到下一个可能的“顶层起始点”，避免卡死在坏 token 上。
     fn sync_top_level(&mut self) {
-        // 确保至少前进一个 token
+        // Top-level panic-mode recovery: skip to next likely item start.
+        // Always ensure we make progress.
         if !self.at_end() {
             self.i += 1;
         }
+
+        while !self.at_end() {
+            self.skip_trivia();
+            if self.at_end() {
+                return;
+            }
+
+            // Strong boundaries
+            if self.cur_is_punct(";") {
+                self.bump(); // consume to avoid repeating the same error on next iteration
+                return;
+            }
+            if self.cur_is_punct("}") {
+                // keep '}' for the caller (it may close an outer block)
+                return;
+            }
+
+            // Declaration/definition keywords
+            if self.cur_is_kw("typedef")
+                || self.cur_is_kw("struct")
+                || self.cur_is_kw("union")
+                || self.cur_is_kw("enum")
+            {
+                return;
+            }
+
+            // Type start (including typedef names)
+            if self.peek_type_start() {
+                return;
+            }
+
+            // Global statement starts (if allowed)
+            if self.cur_is_kw("if")
+                || self.cur_is_kw("for")
+                || self.cur_is_kw("while")
+                || self.cur_is_kw("do")
+                || self.cur_is_kw("switch")
+                || self.cur_is_kw("return")
+                || self.cur_is_kw("break")
+                || self.cur_is_kw("continue")
+                || self.cur_is_kw("goto")
+            {
+                return;
+            }
+
+            self.i += 1;
+        }
+    }
 
         while !self.at_end() {
             self.skip_trivia();
