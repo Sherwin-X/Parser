@@ -1286,7 +1286,24 @@ impl Parser {
                 self.bump();
                 break;
             }
+
+            // Progress guard: if a statement parse fails to consume any token,
+            // recover to avoid infinite loops.
+            let start_i = self.i;
             v.push(self.parse_stmt());
+            if self.i == start_i && !self.at_end() {
+                let sp = self.cur_span();
+                self.err_push(
+                    "E9001",
+                    "parser made no progress in block; skipping tokens to recover".to_string(),
+                    sp,
+                );
+                self.sync();
+                if self.cur_is_punct("}") {
+                    self.bump();
+                    break;
+                }
+            }
         }
         Stmt::Block(v)
     }
