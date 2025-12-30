@@ -327,14 +327,50 @@ impl Parser {
     // 同步：到分号/右花/右括/右方/逗号/下一 case/default
     fn sync(&mut self) {
         // Panic-mode recovery inside statements/expressions.
-        // Skip tokens until we reach a reasonable boundary.
+        // Skip tokens until we reach a reasonable boundary token.
         while !self.at_end() {
-            // If we've just consumed something and landed on a boundary, decide whether to consume it.
+            // Consume separators so we don't get stuck reporting the same error.
             if self.cur_is_punct(";") || self.cur_is_punct(",") {
-                // For ';' and ',', consuming helps avoid getting stuck on the same boundary token.
                 self.bump();
                 return;
             }
+
+            // Do not consume closers / label separators: caller should decide how to unwind.
+            if self.cur_is_punct("}") || self.cur_is_punct(")") || self.cur_is_punct("]") || self.cur_is_punct(":") {
+                return;
+            }
+
+            // Switch labels / else: let the higher-level parser see them.
+            if self.cur_is_kw("case") || self.cur_is_kw("default") || self.cur_is_kw("else") {
+                return;
+            }
+
+            // Potential statement/decl starts: stop so outer loop can re-dispatch.
+            if self.cur_is_kw("if")
+                || self.cur_is_kw("for")
+                || self.cur_is_kw("while")
+                || self.cur_is_kw("do")
+                || self.cur_is_kw("switch")
+                || self.cur_is_kw("return")
+                || self.cur_is_kw("break")
+                || self.cur_is_kw("continue")
+                || self.cur_is_kw("goto")
+                || self.cur_is_kw("typedef")
+                || self.cur_is_kw("struct")
+                || self.cur_is_kw("union")
+                || self.cur_is_kw("enum")
+            {
+                return;
+            }
+
+            // Also treat '{' as a reasonable boundary for statement recovery.
+            if self.cur_is_punct("{") {
+                return;
+            }
+
+            self.i += 1;
+        }
+    }
             if self.cur_is_punct("}") || self.cur_is_punct(")") || self.cur_is_punct("]") {
                 // Do not consume closing delimiters: let the caller decide how to unwind.
                 return;
