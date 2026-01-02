@@ -164,16 +164,32 @@ impl ParseError {
     }
 }
 
+
+const MAX_ERRORS: usize = 50;
 /* ===================== Parser ===================== */
 
 pub struct Parser {
     tokens: Vec<Token>,
     i: usize,
     source: String,
+    line_starts: Vec<usize>,
     pub errors: Vec<ParseError>,
 
     // typedef 符号表（只存名字，不展开真实类型）
     typedefs: HashSet<String>,
+}
+
+
+fn build_line_starts(source: &str) -> Vec<usize> {
+    // Byte offsets of each line start; line 1 starts at 0.
+    let mut starts = Vec::with_capacity(128);
+    starts.push(0);
+    for (i, b) in source.as_bytes().iter().enumerate() {
+        if *b == b'\n' {
+            starts.push(i + 1);
+        }
+    }
+    starts
 }
 
 impl Parser {
@@ -182,6 +198,7 @@ impl Parser {
             tokens,
             i: 0,
             source,
+            line_starts: build_line_starts(&source),
             errors: vec![],
             typedefs: HashSet::new(),
         }
@@ -255,22 +272,27 @@ impl Parser {
     }
 
     fn line_text_at(&self, span: Span) -> String {
-        let bs = self.source.as_bytes();
-        let mut cur = 1usize;
-        let mut start = 0usize;
-        for i in 0..=bs.len() {
-            if i == bs.len() || bs[i] == b'\n' {
-                if cur == span.line {
-                    return String::from_utf8_lossy(&bs[start..i]).into_owned();
-                }
-                cur += 1;
-                start = i + 1;
-            }
+        if span.line == 0 {
+            return String::new();
         }
-        String::new()
+        let line_idx = span.line.saturating_sub(1);
+        if line_idx >= self.line_starts.len() {
+            return String::new();
+        }
+        let start = self.line_starts[line_idx];
+        let end = if line_idx + 1 < self.line_starts.len() {
+            // exclude trailing '\n'
+            self.line_starts[line_idx + 1].saturating_sub(1)
+        } else {
+            self.source.len()
+        };
+        self.source.get(start..end).unwrap_or("").to_string()
     }
 
     fn err_push(&mut self, code: &'static str, message: String, span: Span) {
+        if self.errors.len() >= MAX_ERRORS {
+            return;
+        }
         let line_text = self.line_text_at(span);
         self.errors.push(ParseError {
             code,
