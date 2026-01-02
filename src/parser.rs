@@ -407,7 +407,8 @@ impl Parser {
                 return;
             }
             if self.cur_is_punct("}") {
-                // keep '}' for the caller (it may close an outer block)
+                // Stray close at top level: consume so we can make progress.
+                self.bump();
                 return;
             }
 
@@ -880,8 +881,8 @@ impl Parser {
                     sp,
                 );
                 self.sync_top_level();
-                // 吃掉同步点上的 ';'，避免下一轮再次卡住
-                if self.cur_is_punct(";") {
+                // 吃掉明显的分隔符/孤立闭合符，避免下一轮再次卡住
+                if self.cur_is_punct(";") || self.cur_is_punct(",") || self.cur_is_punct("}") {
                     self.bump();
                 }
             }
