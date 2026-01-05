@@ -166,6 +166,7 @@ impl ParseError {
 
 
 const MAX_ERRORS: usize = 50;
+const MAX_ERRORS_BEFORE_ABORT: usize = MAX_ERRORS - 1;
 /* ===================== Parser ===================== */
 
 pub struct Parser {
@@ -174,6 +175,8 @@ pub struct Parser {
     source: String,
     line_starts: Vec<usize>,
     pub errors: Vec<ParseError>,
+
+    aborted: bool,
 
     // typedef 符号表（只存名字，不展开真实类型）
     typedefs: HashSet<String>,
@@ -290,9 +293,28 @@ impl Parser {
     }
 
     fn err_push(&mut self, code: &'static str, message: String, span: Span) {
-        if self.errors.len() >= MAX_ERRORS {
+        if self.aborted {
             return;
         }
+
+        // Reserve the last slot for a final "too many errors" message.
+        if self.errors.len() >= MAX_ERRORS_BEFORE_ABORT {
+            self.aborted = true;
+
+            // Best-effort: attach the abort message to the current location.
+            let line_text = self.line_text_at(span);
+            self.errors.push(ParseError {
+                code: "E9999",
+                message: format!("too many errors (>{}), aborting parse", MAX_ERRORS_BEFORE_ABORT),
+                span,
+                line_text,
+            });
+
+            // Force parsing loops to stop cleanly.
+            self.i = self.tokens.len();
+            return;
+        }
+
         let line_text = self.line_text_at(span);
         self.errors.push(ParseError {
             code,
