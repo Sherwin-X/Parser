@@ -176,6 +176,8 @@ pub struct Parser {
     line_starts: Vec<usize>,
     pub errors: Vec<ParseError>,
 
+    seen_errors: HashSet<(String, usize, usize)>,
+
     aborted: bool,
 
     // typedef 符号表（只存名字，不展开真实类型）
@@ -203,6 +205,8 @@ impl Parser {
             source,
             line_starts: build_line_starts(&source),
             errors: vec![],
+            seen_errors: HashSet::new(),
+            aborted: false,
             typedefs: HashSet::new(),
         }
     }
@@ -296,6 +300,13 @@ impl Parser {
         if self.aborted {
             return;
         }
+
+        // Deduplicate repeated errors at the same span (common during recovery).
+        let key = (code.to_string(), span.idx, span.len);
+        if self.seen_errors.contains(&key) {
+            return;
+        }
+        self.seen_errors.insert(key);
 
         // Reserve the last slot for a final "too many errors" message.
         if self.errors.len() >= MAX_ERRORS_BEFORE_ABORT {
