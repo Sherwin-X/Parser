@@ -153,13 +153,89 @@ pub struct ParseError {
 
 impl ParseError {
     pub fn render(&self) -> String {
+        const TAB_WIDTH: usize = 4;
+        const MAX_WIDTH: usize = 140;
+
+        fn expand_tabs(s: &str) -> String {
+            let mut out = String::with_capacity(s.len());
+            let mut col = 0usize;
+            for ch in s.chars() {
+                match ch {
+                    '\t' => {
+                        // Advance to next tab stop.
+                        let next = ((col / TAB_WIDTH) + 1) * TAB_WIDTH;
+                        let spaces = next.saturating_sub(col).max(1);
+                        out.extend(std::iter::repeat(' ').take(spaces));
+                        col = next;
+                    }
+                    _ => {
+                        out.push(ch);
+                        col += 1;
+                    }
+                }
+            }
+            out
+        }
+
+        fn visual_col(prefix: &str) -> usize {
+            let mut col = 0usize;
+            for ch in prefix.chars() {
+                if ch == '\t' {
+                    let next = ((col / TAB_WIDTH) + 1) * TAB_WIDTH;
+                    col = next;
+                } else {
+                    col += 1;
+                }
+            }
+            col
+        }
+
+        let raw_line = self.line_text.trim_end_matches(['\r', '\n']);
+        let expanded = expand_tabs(raw_line);
+
+        // span.col is 1-based; compute visual column for caret (0-based)
+        let prefix = raw_line.chars().take(self.span.col.saturating_sub(1)).collect::<String>();
+        let vcol = visual_col(&prefix);
+
+        // Window the line if too long, keeping the caret in view.
+        let mut start = 0usize;
+        if expanded.chars().count() > MAX_WIDTH {
+            start = vcol.saturating_sub(MAX_WIDTH / 2);
+        }
+
+        // Convert char indices to byte indices safely.
+        let expanded_chars: Vec<char> = expanded.chars().collect();
+        if start > expanded_chars.len() {
+            start = expanded_chars.len();
+        }
+        let mut end = (start + MAX_WIDTH).min(expanded_chars.len());
+
+        // Adjust start/end to keep a reasonable window near the end.
+        if end == expanded_chars.len() && end.saturating_sub(MAX_WIDTH) < start {
+            start = end.saturating_sub(MAX_WIDTH);
+        }
+
+        let mut shown_line: String = expanded_chars[start..end].iter().collect();
+
+        let left_ellipsis = start > 0;
+        let right_ellipsis = end < expanded_chars.len();
+        if left_ellipsis {
+            shown_line = format!("…{}", shown_line);
+        }
+        if right_ellipsis {
+            shown_line.push('…');
+        }
+
+        let caret_pos = vcol.saturating_sub(start) + if left_ellipsis { 1 } else { 0 };
+        let caret_len = self.span.len.max(1);
+
         let mut caret = String::new();
-        let pos = self.span.col.saturating_sub(1);
-        caret.push_str(&" ".repeat(pos));
-        caret.push_str(&"^".repeat(self.span.len.max(1)));
+        caret.push_str(&" ".repeat(caret_pos));
+        caret.push_str(&"^".repeat(caret_len));
+
         format!(
             "{}: {} at {}:{}\n{}\n{}\n",
-            self.code, self.message, self.span.line, self.span.col, self.line_text, caret
+            self.code, self.message, self.span.line, self.span.col, shown_line, caret
         )
     }
 }
