@@ -416,7 +416,17 @@ impl Parser {
         let got = if self.at_end() {
             "EOF".to_string()
         } else {
-            format!("'{}'", self.tokens[self.i].text())
+            let t = &self.tokens[self.i];
+            // Keep messages stable (no raw newlines/tabs) and reasonably short.
+            let mut s = t.text().to_string();
+            s = s.replace('\n', "\\n")
+                 .replace('\r', "\\r")
+                 .replace('\t', "\\t");
+            if s.len() > 40 {
+                s.truncate(40);
+                s.push('…');
+            }
+            format!("{:?} '{}'", t.kind(), s)
         };
         self.err_push("E1001", format!("expected {}, found {}", expected, got), span);
         self.sync();
