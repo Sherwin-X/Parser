@@ -233,9 +233,20 @@ impl ParseError {
         caret.push_str(&" ".repeat(caret_pos));
         caret.push_str(&"^".repeat(caret_len));
 
+        {
+        let line_no = self.span.line;
+        let line_prefix = format!("{:>4} | ", line_no);
+        let gutter = "     | ";
         format!(
-            "{}: {} at {}:{}\n{}\n{}\n",
-            self.code, self.message, self.span.line, self.span.col, shown_line, caret
+            "{}: {} at {}:{}\n{}{}\n{}{}\n",
+            self.code,
+            self.message,
+            self.span.line,
+            self.span.col,
+            line_prefix,
+            shown_line,
+            gutter,
+            caret
         )
     }
 }
