@@ -487,6 +487,21 @@ impl Parser {
                 return;
             }
 
+    fn sync_in_switch(&mut self) {
+        // Recovery inside a switch body: stop at the next label ('case'/'default')
+        // or the closing '}' so we don't skip whole sections.
+        while !self.at_end() {
+            if self.cur_is_kw("case") || self.cur_is_kw("default") || self.cur_is_punct("}") {
+                return;
+            }
+            if self.cur_is_punct(";") {
+                self.bump();
+                return;
+            }
+            self.bump();
+        }
+    }
+
             // Do not consume closers / label separators: caller should decide how to unwind.
             if self.cur_is_punct("}") || self.cur_is_punct(")") || self.cur_is_punct("]") || self.cur_is_punct(":") {
                 return;
@@ -1806,7 +1821,29 @@ impl Parser {
                 }
                 continue;
             }
+            let start_i = self.i;
+
             cur_body.push(self.parse_stmt());
+
+            if self.i == start_i && !self.at_end() {
+
+                let sp = self.cur_span();
+
+                self.err_push(
+
+                    "E9002",
+
+                    "parser made no progress in switch; skipping tokens to recover".to_string(),
+
+                    sp,
+
+                );
+
+                self.sync_in_switch();
+
+                continue;
+
+            }
         }
         Stmt::Switch { expr, cases }
     }
