@@ -1859,38 +1859,65 @@ impl Parser {
     /* ===================== 初始化器 ===================== */
 
     fn parse_initializer(&mut self) -> Init {
-        if self.cur_is_punct("{") {
-            self.bump();
-            let mut list = Vec::new();
-            if !self.cur_is_punct("}") {
-                loop {
-                    list.push(self.parse_initializer());
+    if self.cur_is_punct("{") {
+        let start_span = self.cur_span();
+        self.bump(); // '{'
+
+        let mut list = Vec::new();
+
+        if !self.cur_is_punct("}") {
+            loop {
+                let before = self.i;
+
+                list.push(self.parse_initializer());
+
+                // If we didn't consume anything, recover to avoid infinite loops.
+                if self.i == before && !self.at_end() {
+                    self.err_custom_span(
+                        "E4003",
+                        "parser made no progress in initializer list; skipping tokens to recover"
+                            .to_string(),
+                        start_span,
+                    );
+                    // Try to sync to either ',' or '}' so we can continue parsing other inits.
+                    while !self.at_end()
+                        && !self.cur_is_punct(",")
+                        && !self.cur_is_punct("}")
+                    {
+                        self.i += 1;
+                    }
+                }
+
+                if self.cur_is_punct("}") {
+                    break;
+                }
+
+                if self.cur_is_punct(",") {
+                    self.bump(); // ','
+                    // Allow trailing comma: { 1, 2, }
                     if self.cur_is_punct("}") {
                         break;
                     }
-                    if self.cur_is_punct(",") {
-                        self.bump();
-                        if self.cur_is_punct(")") || self.cur_is_punct("}") {
-                            break;
-                        }
-                        continue;
-                    } else {
-                        self.err_custom_here("E4002", "missing ',' between initializers");
-                        break;
-                    }
+                    continue;
+                } else {
+                    self.err_custom_here("E4002", "missing ',' between initializers");
+                    break;
                 }
             }
-            if !self.cur_is_punct("}") {
-                self.err_custom_here("E4001", "unclosed initializer list, expected '}'");
-            }
-            self.expect_punct("}");
-            Init::List(list)
-        } else {
-            Init::Expr(self.parse_assignment())
         }
-    }
 
-    /* ===================== 表达式 ===================== */
+        if !self.cur_is_punct("}") {
+            self.err_custom_here("E4001", "unclosed initializer list, expected '}'");
+        }
+        self.expect_punct("}");
+        Init::List(list)
+    } else {
+        Init::Expr(self.parse_assignment())
+    }
+}
+
+/* ===================== 表达式 ===================== */
+
 
     pub fn parse_expr(&mut self) -> Expr {
         let mut list = vec![self.parse_assignment()];
