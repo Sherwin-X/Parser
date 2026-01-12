@@ -227,7 +227,10 @@ impl ParseError {
         }
 
         let caret_pos = vcol.saturating_sub(start) + if left_ellipsis { 1 } else { 0 };
-        let caret_len = self.span.len.max(1);
+        let mut caret_len = self.span.len.max(1);
+        let max_caret = MAX_WIDTH.saturating_sub(caret_pos).max(1);
+        if caret_len > max_caret { caret_len = max_caret; }
+
 
         let mut caret = String::new();
         caret.push_str(&" ".repeat(caret_pos));
@@ -380,7 +383,8 @@ impl Parser {
         } else {
             self.source.len()
         };
-        self.source.get(start..end).unwrap_or("").to_string()
+        self.source.get(start..end).unwrap_or("").trim_end_matches("
+").to_string()
     }
 
     fn err_push(&mut self, code: &'static str, message: String, span: Span) {
