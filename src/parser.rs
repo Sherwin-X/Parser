@@ -148,7 +148,13 @@ pub struct ParseError {
     pub code: &'static str,
     pub message: String,
     pub span: Span,
+
+    /// The source line at `span.line` (without trailing newline).
     pub line_text: String,
+    /// Optional context line before `span.line`.
+    pub prev_line: Option<(usize, String)>,
+    /// Optional context line after `span.line`.
+    pub next_line: Option<(usize, String)>,
 }
 
 impl ParseError {
@@ -162,7 +168,6 @@ impl ParseError {
             for ch in s.chars() {
                 match ch {
                     '\t' => {
-                        // Advance to next tab stop.
                         let next = ((col / TAB_WIDTH) + 1) * TAB_WIDTH;
                         let spaces = next.saturating_sub(col).max(1);
                         out.extend(std::iter::repeat(' ').take(spaces));
@@ -190,33 +195,32 @@ impl ParseError {
             col
         }
 
-        let raw_line = self.line_text.trim_end_matches(['\r', '\n']);
+        // Prepare the main line (tabs expanded, CR/LF stripped).
+        let raw_line = self.line_text.trim_end_matches(&['\r', '\n'][..]);
         let expanded = expand_tabs(raw_line);
 
-        // span.col is 1-based; compute visual column for caret (0-based)
-        let prefix = raw_line.chars().take(self.span.col.saturating_sub(1)).collect::<String>();
+        // span.col is 1-based; compute visual caret column (0-based).
+        let prefix = raw_line
+            .chars()
+            .take(self.span.col.saturating_sub(1))
+            .collect::<String>();
         let vcol = visual_col(&prefix);
 
         // Window the line if too long, keeping the caret in view.
         let mut start = 0usize;
-        if expanded.chars().count() > MAX_WIDTH {
+        let expanded_chars: Vec<char> = expanded.chars().collect();
+        if expanded_chars.len() > MAX_WIDTH {
             start = vcol.saturating_sub(MAX_WIDTH / 2);
         }
-
-        // Convert char indices to byte indices safely.
-        let expanded_chars: Vec<char> = expanded.chars().collect();
         if start > expanded_chars.len() {
             start = expanded_chars.len();
         }
         let mut end = (start + MAX_WIDTH).min(expanded_chars.len());
-
-        // Adjust start/end to keep a reasonable window near the end.
         if end == expanded_chars.len() && end.saturating_sub(MAX_WIDTH) < start {
             start = end.saturating_sub(MAX_WIDTH);
         }
 
         let mut shown_line: String = expanded_chars[start..end].iter().collect();
-
         let left_ellipsis = start > 0;
         let right_ellipsis = end < expanded_chars.len();
         if left_ellipsis {
@@ -229,29 +233,46 @@ impl ParseError {
         let caret_pos = vcol.saturating_sub(start) + if left_ellipsis { 1 } else { 0 };
         let mut caret_len = self.span.len.max(1);
         let max_caret = MAX_WIDTH.saturating_sub(caret_pos).max(1);
-        if caret_len > max_caret { caret_len = max_caret; }
-
+        if caret_len > max_caret {
+            caret_len = max_caret;
+        }
 
         let mut caret = String::new();
         caret.push_str(&" ".repeat(caret_pos));
         caret.push_str(&"^".repeat(caret_len));
 
-        {
-        let line_no = self.span.line;
-        let w = std::cmp::max(4usize, line_no.to_string().len());
-        let line_prefix = format!("{:>width$} | ", line_no, width = w);
+        // Dynamic gutter width based on the largest line number displayed.
+        let mut max_line_no = self.span.line;
+        if let Some((ln, _)) = &self.prev_line {
+            max_line_no = max_line_no.max(*ln);
+        }
+        if let Some((ln, _)) = &self.next_line {
+            max_line_no = max_line_no.max(*ln);
+        }
+        let w = std::cmp::max(4usize, max_line_no.to_string().len());
+        let mk_prefix = |ln: usize| format!("{:>width$} | ", ln, width = w);
         let gutter = format!("{} | ", " ".repeat(w));
-        format!(
-            "{}: {} at {}:{}\n{}{}\n{}{}\n",
-            self.code,
-            self.message,
-            self.span.line,
-            self.span.col,
-            line_prefix,
-            shown_line,
-            gutter,
-            caret
-        )
+
+        let mut out = String::new();
+        out.push_str(&format!(
+            "{}: {} at {}:{}\n",
+            self.code, self.message, self.span.line, self.span.col
+        ));
+
+        if let Some((ln, txt)) = &self.prev_line {
+            let t = expand_tabs(txt.trim_end_matches(&['\r', '\n'][..]));
+            out.push_str(&format!("{}{}\n", mk_prefix(*ln), t));
+        }
+
+        out.push_str(&format!("{}{}\n", mk_prefix(self.span.line), shown_line));
+        out.push_str(&format!("{}{}\n", gutter, caret));
+
+        if let Some((ln, txt)) = &self.next_line {
+            let t = expand_tabs(txt.trim_end_matches(&['\r', '\n'][..]));
+            out.push_str(&format!("{}{}\n", mk_prefix(*ln), t));
+        }
+
+        out
     }
 }
 
@@ -370,22 +391,28 @@ impl Parser {
     }
 
     fn line_text_at(&self, span: Span) -> String {
-        if span.line == 0 {
+        self.line_text_by_no(span.line)
+    }
+
+    fn line_text_by_no(&self, line_no: usize) -> String {
+        if line_no == 0 {
             return String::new();
         }
-        let line_idx = span.line.saturating_sub(1);
+        let line_idx = line_no.saturating_sub(1);
         if line_idx >= self.line_starts.len() {
             return String::new();
         }
         let start = self.line_starts[line_idx];
         let end = if line_idx + 1 < self.line_starts.len() {
-            // exclude trailing '\n'
-            self.line_starts[line_idx + 1].saturating_sub(1)
+            self.line_starts[line_idx + 1].saturating_sub(1) // exclude trailing '\n'
         } else {
             self.source.len()
         };
-        self.source.get(start..end).unwrap_or("").trim_end_matches("
-").to_string()
+        self.source
+            .get(start..end)
+            .unwrap_or("")
+            .trim_end_matches(&['\r', '\n'][..])
+            .to_string()
     }
 
     fn err_push(&mut self, code: &'static str, message: String, span: Span) {
@@ -411,6 +438,13 @@ impl Parser {
                 message: format!("too many errors (>{}), aborting parse", MAX_ERRORS_BEFORE_ABORT),
                 span,
                 line_text,
+                prev_line: if span.line > 1 {
+                    Some((span.line - 1, self.line_text_by_no(span.line - 1)))
+                } else {
+                    None
+                },
+                next_line: Some((span.line + 1, self.line_text_by_no(span.line + 1)))
+                    .filter(|(_, s)| !s.is_empty()),
             });
 
             // Force parsing loops to stop cleanly.
@@ -424,6 +458,13 @@ impl Parser {
             message,
             span,
             line_text,
+            prev_line: if span.line > 1 {
+                Some((span.line - 1, self.line_text_by_no(span.line - 1)))
+            } else {
+                None
+            },
+            next_line: Some((span.line + 1, self.line_text_by_no(span.line + 1)))
+                .filter(|(_, s)| !s.is_empty()),
         });
     }
 
