@@ -238,8 +238,9 @@ impl ParseError {
 
         {
         let line_no = self.span.line;
-        let line_prefix = format!("{:>4} | ", line_no);
-        let gutter = "     | ";
+        let w = std::cmp::max(4usize, line_no.to_string().len());
+        let line_prefix = format!("{:>width$} | ", line_no, width = w);
+        let gutter = format!("{} | ", " ".repeat(w));
         format!(
             "{}: {} at {}:{}\n{}{}\n{}{}\n",
             self.code,
