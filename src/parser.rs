@@ -309,6 +309,15 @@ fn build_line_starts(source: &str) -> Vec<usize> {
     starts
 }
 
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum InfixKind {
+    Binary,
+    Assign,
+    Ternary,
+    Comma,
+}
+
 impl Parser {
     pub fn new(tokens: Vec<Token>, source: String) -> Self {
         Self {
@@ -522,10 +531,9 @@ impl Parser {
         }
     }
 
-    // 同步：到分号/右花/右括/右方/逗号/下一 case/default
+    // 同步：在语句/表达式内部进行 panic-mode 恢复
+    // 跳过 token，直到遇到一个“边界 token”（分隔符、闭合符、关键关键字等）
     fn sync(&mut self) {
-        // Panic-mode recovery inside statements/expressions.
-        // Skip tokens until we reach a reasonable boundary token.
         while !self.at_end() {
             // Consume separators so we don't get stuck reporting the same error.
             if self.cur_is_punct(";") || self.cur_is_punct(",") {
@@ -533,23 +541,12 @@ impl Parser {
                 return;
             }
 
-    fn sync_in_switch(&mut self) {
-        // Recovery inside a switch body: stop at the next label ('case'/'default')
-        // or the closing '}' so we don't skip whole sections.
-        while !self.at_end() {
-            if self.cur_is_kw("case") || self.cur_is_kw("default") || self.cur_is_punct("}") {
-                return;
-            }
-            if self.cur_is_punct(";") {
-                self.bump();
-                return;
-            }
-            self.bump();
-        }
-    }
-
             // Do not consume closers / label separators: caller should decide how to unwind.
-            if self.cur_is_punct("}") || self.cur_is_punct(")") || self.cur_is_punct("]") || self.cur_is_punct(":") {
+            if self.cur_is_punct("}")
+                || self.cur_is_punct(")")
+                || self.cur_is_punct("]")
+                || self.cur_is_punct(":")
+            {
                 return;
             }
 
@@ -576,7 +573,7 @@ impl Parser {
                 return;
             }
 
-            // Also treat '{' as a reasonable boundary for statement recovery.
+            // Treat '{' as a reasonable boundary for statement recovery.
             if self.cur_is_punct("{") {
                 return;
             }
@@ -584,25 +581,24 @@ impl Parser {
             self.i += 1;
         }
     }
-            if self.cur_is_punct("}") || self.cur_is_punct(")") || self.cur_is_punct("]") {
-                // Do not consume closing delimiters: let the caller decide how to unwind.
+
+    // switch body 内部的同步：不要跳过后续 case/default
+    fn sync_in_switch(&mut self) {
+        while !self.at_end() {
+            if self.cur_is_kw("case") || self.cur_is_kw("default") || self.cur_is_punct("}") {
                 return;
             }
-            if self.cur_is_kw("case") || self.cur_is_kw("default") {
-                // Do not consume labels: switch parser needs to see them.
+            if self.cur_is_punct(";") {
+                self.bump();
                 return;
             }
-            self.i += 1;
-        }
-    }
-            self.i += 1;
+            self.bump();
         }
     }
 
     /// 顶层同步：用于 parse_items() 的 panic-mode 恢复。
     /// 目标：跳到下一个可能的“顶层起始点”，避免卡死在坏 token 上。
     fn sync_top_level(&mut self) {
-        // Top-level panic-mode recovery: skip to next likely item start.
         // Always ensure we make progress.
         if !self.at_end() {
             self.i += 1;
@@ -640,49 +636,6 @@ impl Parser {
             }
 
             // Global statement starts (if allowed)
-            if self.cur_is_kw("if")
-                || self.cur_is_kw("for")
-                || self.cur_is_kw("while")
-                || self.cur_is_kw("do")
-                || self.cur_is_kw("switch")
-                || self.cur_is_kw("return")
-                || self.cur_is_kw("break")
-                || self.cur_is_kw("continue")
-                || self.cur_is_kw("goto")
-            {
-                return;
-            }
-
-            self.i += 1;
-        }
-    }
-
-        while !self.at_end() {
-            self.skip_trivia();
-            if self.at_end() {
-                return;
-            }
-
-            // 常见同步点：分号/右花括号
-            if self.cur_is_punct(";") || self.cur_is_punct("}") {
-                return;
-            }
-
-            // 顶层声明/定义关键字
-            if self.cur_is_kw("typedef")
-                || self.cur_is_kw("struct")
-                || self.cur_is_kw("union")
-                || self.cur_is_kw("enum")
-            {
-                return;
-            }
-
-            // 类型起始（包含 typedef 名）
-            if self.peek_type_start() {
-                return;
-            }
-
-            // 允许的“全局语句”起始（如果你的 parser 支持全局 stmt）
             if self.cur_is_kw("if")
                 || self.cur_is_kw("for")
                 || self.cur_is_kw("while")
@@ -1261,6 +1214,7 @@ impl Parser {
 
         loop {
             self.skip_trivia();
+            let iter_start = self.i;
             if self.at_end() {
                 self.err_custom_here("E3006", "unclosed enum body, expected '}' before EOF");
                 break;
@@ -1301,6 +1255,20 @@ impl Parser {
                 name: cname,
                 value,
             });
+
+            // Progress guard: avoid infinite loop on malformed enum bodies.
+            if self.i == iter_start {
+                let sp = self.cur_span();
+                self.err_push(
+                    "E9005",
+                    "no progress while parsing enum body".to_string(),
+                    sp,
+                );
+                self.sync();
+                if self.cur_is_punct(",") { self.bump(); }
+                if self.cur_is_punct("}") { self.bump(); }
+                continue;
+            }
 
             if self.cur_is_punct(",") {
                 self.bump();
@@ -1367,6 +1335,7 @@ impl Parser {
         let mut v = vec![];
         if !self.cur_is_punct(")") {
             loop {
+                let param_start = self.i;
                 if !self.peek_type_start() {
                     self.err_custom_here("E2103", "expected type in parameter");
                     break;
@@ -1387,6 +1356,18 @@ impl Parser {
                     name,
                     array_dims: dims,
                 });
+
+                if self.i == param_start {
+                    let sp = self.cur_span();
+                    self.err_push(
+                        "E9004",
+                        "no progress while parsing parameter".to_string(),
+                        sp,
+                    );
+                    self.sync();
+                    if self.cur_is_punct(",") { self.bump(); }
+                    break;
+                }
 
                 if self.cur_is_punct(")") {
                     break;
@@ -1957,170 +1938,330 @@ impl Parser {
         }
         self.expect_punct("}");
         Init::List(list)
-    } else {
-        Init::Expr(self.parse_assignment())
-    }
-}
-
-/* ===================== 表达式 ===================== */
-
-
+    } 
     pub fn parse_expr(&mut self) -> Expr {
-        let mut list = vec![self.parse_assignment()];
-        while self.cur_is_op(",") {
-            self.bump();
-            list.push(self.parse_assignment());
-        }
-        if list.len() == 1 {
-            list.pop().unwrap()
-        } else {
-            Expr::Comma(list)
-        }
+        self.parse_expr_bp(0)
     }
 
-    fn parse_assignment(&mut self) -> Expr {
-        let lhs = self.parse_conditional();
-        if let Some(t) = self.cur() {
-            if let TokenType::Operator = t.kind() {
-                let op = t.text();
-                if ["=", "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^="].contains(&op) {
-                    let op_str = op.to_string();
-                    self.bump();
-                    let rhs = self.parse_assignment();
-                    return Expr::Assign {
-                        op: op_str,
+    // Pratt parser (binding power)
+    // Lowest -> highest:
+    //   , (comma)
+    //   assignment (=, +=, ...)
+    //   ?: (ternary)
+    //   ||, &&,
+    //   |, ^, &,
+    //   == !=,
+    //   < <= > >=,
+    //   << >>,
+    //   + -,
+    //   * / %,
+    //   prefix, postfix
+    fn parse_expr_bp(&mut self, min_bp: u8) -> Expr {
+        self.skip_trivia();
+        let mut lhs = self.parse_prefix();
+
+        loop {
+            self.skip_trivia();
+
+            // Postfix operators (highest precedence)
+            if self.cur_text_is("++") {
+                self.bump();
+                lhs = Expr::PostInc(Box::new(lhs));
+                continue;
+            }
+            if self.cur_text_is("--") {
+                self.bump();
+                lhs = Expr::PostDec(Box::new(lhs));
+                continue;
+            }
+            if self.cur_text_is("(") {
+                // function call: only supports identifier callee in current AST
+                let args = self.parse_call_args();
+                lhs = match lhs {
+                    Expr::Ident(name) => Expr::Call { callee: name, args },
+                    other => {
+                        self.err_custom_span(
+                            "E3301",
+                            "call expression currently supports only identifier callee".into(),
+                            self.cur_span(),
+                        );
+                        Expr::Call {
+                            callee: "<expr>".into(),
+                            args,
+                        }
+                    }
+                };
+                continue;
+            }
+            if self.cur_text_is("[") {
+                self.bump();
+                let idx = self.parse_expr_bp(0);
+                self.expect_punct("]");
+                lhs = Expr::Index {
+                    base: Box::new(lhs),
+                    index: Box::new(idx),
+                };
+                continue;
+            }
+            if self.cur_text_is(".") {
+                self.bump();
+                let field = if self.cur_is(&TokenType::Identifier) {
+                    self.bump().unwrap().text().to_string()
+                } else {
+                    self.err_custom_here("E3302", "expected field name after '.'");
+                    "_field".into()
+                };
+                lhs = Expr::Member {
+                    base: Box::new(lhs),
+                    field,
+                };
+                continue;
+            }
+            if self.cur_text_is("->") {
+                self.bump();
+                let field = if self.cur_is(&TokenType::Identifier) {
+                    self.bump().unwrap().text().to_string()
+                } else {
+                    self.err_custom_here("E3303", "expected field name after '->'");
+                    "_field".into()
+                };
+                lhs = Expr::PtrMember {
+                    base: Box::new(lhs),
+                    field,
+                };
+                continue;
+            }
+
+            // Infix / ternary / assignment / comma
+            let Some((op, l_bp, r_bp, kind)) = self.peek_infix_bp() else {
+                break;
+            };
+            if l_bp < min_bp {
+                break;
+            }
+
+            // consume operator token
+            self.bump();
+
+            match kind {
+                InfixKind::Comma => {
+                    let rhs = self.parse_expr_bp(r_bp);
+                    lhs = match lhs {
+                        Expr::Comma(mut v) => {
+                            v.push(rhs);
+                            Expr::Comma(v)
+                        }
+                        other => Expr::Comma(vec![other, rhs]),
+                    };
+                }
+                InfixKind::Assign => {
+                    let rhs = self.parse_expr_bp(r_bp);
+                    lhs = Expr::Assign {
+                        op,
+                        lhs: Box::new(lhs),
+                        rhs: Box::new(rhs),
+                    };
+                }
+                InfixKind::Ternary => {
+                    // already consumed '?'
+                    let then_e = self.parse_expr_bp(0);
+                    if !self.cur_text_is(":") {
+                        self.err_custom_here("E3310", "expected ':' in ternary expression");
+                    } else {
+                        self.bump();
+                    }
+                    let else_e = self.parse_expr_bp(r_bp);
+                    lhs = Expr::Ternary {
+                        cond: Box::new(lhs),
+                        then_e: Box::new(then_e),
+                        else_e: Box::new(else_e),
+                    };
+                }
+                InfixKind::Binary => {
+                    let rhs = self.parse_expr_bp(r_bp);
+                    lhs = Expr::Binary {
+                        op,
                         lhs: Box::new(lhs),
                         rhs: Box::new(rhs),
                     };
                 }
             }
         }
+
         lhs
     }
 
-    fn parse_conditional(&mut self) -> Expr {
-        let cond = self.parse_binop(0);
-        if self.cur_is_op("?") {
-            self.bump();
-            let then_e = self.parse_assignment();
-            if !self.expect_token_text(":") {
-                self.err_custom_here("E2008", "missing ':' in conditional expression");
-            }
-            let else_e = self.parse_assignment();
-            return Expr::Ternary {
-                cond: Box::new(cond),
-                then_e: Box::new(then_e),
-                else_e: Box::new(else_e),
-            };
-        }
-        cond
-    }
+    fn peek_infix_bp(&self) -> Option<(String, u8, u8, InfixKind)> {
+        let t = self.cur()?;
+        let op = t.text();
 
-    fn precedence(op: &str) -> i32 {
+        // helper for left-assoc precedence p: (2p, 2p+1); right-assoc: (2p, 2p)
+        fn left(p: u8) -> (u8, u8) {
+            (p * 2, p * 2 + 1)
+        }
+        fn right(p: u8) -> (u8, u8) {
+            (p * 2, p * 2)
+        }
+
+        // precedence levels (low -> high)
+        const P_COMMA: u8 = 1;
+        const P_ASSIGN: u8 = 2;
+        const P_TERNARY: u8 = 3;
+        const P_LOR: u8 = 4;
+        const P_LAND: u8 = 5;
+        const P_BOR: u8 = 6;
+        const P_BXOR: u8 = 7;
+        const P_BAND: u8 = 8;
+        const P_EQ: u8 = 9;
+        const P_REL: u8 = 10;
+        const P_SHIFT: u8 = 11;
+        const P_ADD: u8 = 12;
+        const P_MUL: u8 = 13;
+
         match op {
-            "||" => 1,
-            "&&" => 2,
-            "|" => 3,
-            "^" => 4,
-            "&" => 5,
-            "==" | "!=" => 6,
-            "<" | ">" | "<=" | ">=" => 7,
-            "<<" | ">>" => 8,
-            "+" | "-" => 9,
-            "*" | "/" | "%" => 10,
-            _ => -1,
+            "," => {
+                let (l, r) = left(P_COMMA);
+                Some((",".into(), l, r, InfixKind::Comma))
+            }
+
+            // assignment (right associative)
+            "=" | "+=" | "-=" | "*=" | "/=" | "%=" | "&=" | "|=" | "^=" | "<<=" | ">>=" => {
+                let (l, r) = right(P_ASSIGN);
+                Some((op.to_string(), l, r, InfixKind::Assign))
+            }
+
+            // ternary
+            "?" => {
+                let (l, r) = right(P_TERNARY);
+                Some(("?".into(), l, r, InfixKind::Ternary))
+            }
+
+            "||" => {
+                let (l, r) = left(P_LOR);
+                Some(("||".into(), l, r, InfixKind::Binary))
+            }
+            "&&" => {
+                let (l, r) = left(P_LAND);
+                Some(("&&".into(), l, r, InfixKind::Binary))
+            }
+            "|" => {
+                let (l, r) = left(P_BOR);
+                Some(("|".into(), l, r, InfixKind::Binary))
+            }
+            "^" => {
+                let (l, r) = left(P_BXOR);
+                Some(("^".into(), l, r, InfixKind::Binary))
+            }
+            "&" => {
+                let (l, r) = left(P_BAND);
+                Some(("&".into(), l, r, InfixKind::Binary))
+            }
+            "==" | "!=" => {
+                let (l, r) = left(P_EQ);
+                Some((op.to_string(), l, r, InfixKind::Binary))
+            }
+            "<" | "<=" | ">" | ">=" => {
+                let (l, r) = left(P_REL);
+                Some((op.to_string(), l, r, InfixKind::Binary))
+            }
+            "<<" | ">>" => {
+                let (l, r) = left(P_SHIFT);
+                Some((op.to_string(), l, r, InfixKind::Binary))
+            }
+            "+" | "-" => {
+                let (l, r) = left(P_ADD);
+                Some((op.to_string(), l, r, InfixKind::Binary))
+            }
+            "*" | "/" | "%" => {
+                let (l, r) = left(P_MUL);
+                Some((op.to_string(), l, r, InfixKind::Binary))
+            }
+            _ => None,
         }
     }
 
-    fn parse_binop(&mut self, min_prec: i32) -> Expr {
-        let mut lhs = self.parse_unary();
-        loop {
-            let op = if let Some(t) = self.cur() {
-                if let TokenType::Operator = t.kind() {
-                    t.text().to_string()
-                } else {
-                    break;
-                }
-            } else {
-                break;
-            };
-            let prec = Self::precedence(&op);
-            if prec < min_prec || prec < 0 {
-                break;
-            }
-            self.bump();
-            let mut rhs = self.parse_unary();
-            loop {
-                let next_op = if let Some(t) = self.cur() {
-                    if let TokenType::Operator = t.kind() {
-                        t.text().to_string()
-                    } else {
-                        break;
-                    }
-                } else {
-                    break;
-                };
-                let next_prec = Self::precedence(&next_op);
-                if next_prec > prec {
-                    rhs = self.parse_binop(next_prec);
-                } else {
-                    break;
-                }
-            }
-            lhs = Expr::Binary {
-                op,
-                lhs: Box::new(lhs),
-                rhs: Box::new(rhs),
-            };
-        }
-        lhs
-    }
+    fn parse_prefix(&mut self) -> Expr {
+        self.skip_trivia();
 
-    fn parse_unary(&mut self) -> Expr {
-        if self.cur_is_kw("sizeof") || self.cur_is_kw("alignof") {
-            let is_align = self.cur_is_kw("alignof");
+        // prefix ++/--
+        if self.cur_text_is("++") {
             self.bump();
-            if self.cur_is_punct("(") {
+            return Expr::PreInc(Box::new(self.parse_prefix()));
+        }
+        if self.cur_text_is("--") {
+            self.bump();
+            return Expr::PreDec(Box::new(self.parse_prefix()));
+        }
+
+        // unary operators
+        if let Some(t) = self.cur() {
+            if matches!(t.kind(), TokenType::Operator) {
+                let op = t.text();
+                if ["+", "-", "!", "~", "&", "*"].contains(&op) {
+                    let op_str = op.to_string();
+                    self.bump();
+                    return Expr::Unary {
+                        op: op_str,
+                        expr: Box::new(self.parse_prefix()),
+                    };
+                }
+            }
+        }
+
+        // sizeof / alignof
+        if self.cur_is_kw("sizeof") {
+            let kw_span = self.cur_span();
+            self.bump();
+            self.skip_trivia();
+            if self.cur_text_is("(") {
                 let mark = self.save();
-                self.bump();
+                self.bump(); // '('
+                self.skip_trivia();
                 if let Some(ty) = self.parse_type_name_full() {
-                    if self.cur_is_punct(")") {
+                    self.skip_trivia();
+                    if self.cur_text_is(")") {
                         self.bump();
-                        return if is_align {
-                            Expr::AlignofType(ty)
-                        } else {
-                            Expr::SizeofType(ty)
-                        };
+                        return Expr::SizeofType(ty);
                     }
                 }
                 self.restore(mark);
             }
-            let e = self.parse_unary();
-            return if is_align {
-                Expr::AlignofExpr(Box::new(e))
-            } else {
-                Expr::SizeofExpr(Box::new(e))
-            };
+            // sizeof expr
+            let e = self.parse_prefix();
+            return Expr::SizeofExpr(Box::new(e));
         }
 
-        if self.cur_is_op("++") {
+        if self.cur_is_kw("alignof") {
+            let _kw_span = self.cur_span();
             self.bump();
-            let e = self.parse_unary();
-            return Expr::PreInc(Box::new(e));
-        }
-        if self.cur_is_op("--") {
-            self.bump();
-            let e = self.parse_unary();
-            return Expr::PreDec(Box::new(e));
+            self.skip_trivia();
+            if self.cur_text_is("(") {
+                let mark = self.save();
+                self.bump(); // '('
+                self.skip_trivia();
+                if let Some(ty) = self.parse_type_name_full() {
+                    self.skip_trivia();
+                    if self.cur_text_is(")") {
+                        self.bump();
+                        return Expr::AlignofType(ty);
+                    }
+                }
+                self.restore(mark);
+            }
+            let e = self.parse_prefix();
+            return Expr::AlignofExpr(Box::new(e));
         }
 
-        if self.cur_is_punct("(") {
+        // cast: (type) prefix
+        if self.cur_text_is("(") {
             let mark = self.save();
-            self.bump();
+            self.bump(); // '('
+            self.skip_trivia();
             if let Some(ty) = self.parse_type_name_full() {
-                if self.cur_is_punct(")") {
+                self.skip_trivia();
+                if self.cur_text_is(")") {
                     self.bump();
-                    let e = self.parse_unary();
+                    let e = self.parse_prefix();
                     return Expr::Cast {
                         ty,
                         expr: Box::new(e),
@@ -2130,138 +2271,106 @@ impl Parser {
             self.restore(mark);
         }
 
-        if self.cur_is_op("+")
-            || self.cur_is_op("-")
-            || self.cur_is_op("!")
-            || self.cur_is_op("~")
-            || self.cur_is_op("&")
-            || self.cur_is_op("*")
-        {
-            let op = self.bump().unwrap().text().to_string();
-            let e = self.parse_unary();
-            return Expr::Unary {
-                op,
-                expr: Box::new(e),
-            };
-        }
-
-        self.parse_postfix()
-    }
-
-    fn parse_postfix(&mut self) -> Expr {
-        let mut e = self.parse_primary();
-        loop {
-            if self.cur_is_punct("(") {
-                self.bump();
-                let mut args = vec![];
-                if !self.cur_is_punct(")") {
-                    loop {
-                        args.push(self.parse_expr());
-                        if self.cur_is_punct(")") {
-                            break;
-                        }
-                        if !self.expect_token_text(",") {
-                            self.err_custom_here("E2009", "missing ',' between call arguments");
-                            break;
-                        }
-                    }
-                }
-                if !self.cur_is_punct(")") {
-                    self.err_custom_here("E3001", "unclosed argument list, expected ')'");
-                }
-                self.expect_punct(")");
-                if let Expr::Ident(name) = e {
-                    e = Expr::Call {
-                        callee: name,
-                        args,
-                    };
-                } else {
-                    self.err_custom_here("E2201", "call on non-identifier");
-                }
-                continue;
-            }
-            if self.cur_is_punct("[") {
-                self.bump();
-                let idx = self.parse_expr();
-                if !self.cur_is_punct("]") {
-                    self.err_custom_here("E3002", "unterminated subscript, expected ']'");
-                }
-                self.expect_punct("]");
-                e = Expr::Index {
-                    base: Box::new(e),
-                    index: Box::new(idx),
-                };
-                continue;
-            }
-            if self.cur_is_op(".") {
-                self.bump();
-                if self.cur_is(&TokenType::Identifier) {
-                    let field = self.bump().unwrap().text().to_string();
-                    e = Expr::Member {
-                        base: Box::new(e),
-                        field,
-                    };
-                } else {
-                    self.err_custom_here("E2202", "expected identifier after '.'");
-                }
-                continue;
-            }
-            if self.cur_is_op("->") {
-                self.bump();
-                if self.cur_is(&TokenType::Identifier) {
-                    let field = self.bump().unwrap().text().to_string();
-                    e = Expr::PtrMember {
-                        base: Box::new(e),
-                        field,
-                    };
-                } else {
-                    self.err_custom_here("E2203", "expected identifier after '->'");
-                }
-                continue;
-            }
-            if self.cur_is_op("++") {
-                self.bump();
-                e = Expr::PostInc(Box::new(e));
-                continue;
-            }
-            if self.cur_is_op("--") {
-                self.bump();
-                e = Expr::PostDec(Box::new(e));
-                continue;
-            }
-            break;
-        }
-        e
+        self.parse_primary()
     }
 
     fn parse_primary(&mut self) -> Expr {
-        if self.cur_is(&TokenType::IntConstant) {
-            return Expr::Int(self.bump().unwrap().text().to_string());
-        }
-        if self.cur_is(&TokenType::FloatConstant) {
-            return Expr::Float(self.bump().unwrap().text().to_string());
-        }
-        if self.cur_is(&TokenType::StringLiteral) {
-            return Expr::Str(self.bump().unwrap().text().to_string());
-        }
-        if self.cur_is(&TokenType::CharLiteral) {
-            return Expr::Char(self.bump().unwrap().text().to_string());
-        }
-        if self.cur_is(&TokenType::Identifier) {
-            return Expr::Ident(self.bump().unwrap().text().to_string());
-        }
-        if self.cur_is_punct("(") {
+        self.skip_trivia();
+
+        if self.cur_text_is("(") {
             self.bump();
-            let e = self.parse_expr();
-            if !self.cur_is_punct(")") {
-                self.err_custom_here(
-                    "E3001",
-                    "unclosed parenthesized expression, expected ')'",
-                );
-            }
+            let e = self.parse_expr_bp(0);
             self.expect_punct(")");
             return e;
         }
+
+        if let Some(t) = self.cur() {
+            match t.kind() {
+                TokenType::IntConstant => {
+                    let s = t.text().to_string();
+                    self.bump();
+                    return Expr::Int(s);
+                }
+                TokenType::FloatConstant => {
+                    let s = t.text().to_string();
+                    self.bump();
+                    return Expr::Float(s);
+                }
+                TokenType::StringLiteral => {
+                    let s = t.text().to_string();
+                    self.bump();
+                    return Expr::Str(s);
+                }
+                TokenType::CharLiteral => {
+                    let s = t.text().to_string();
+                    self.bump();
+                    return Expr::Char(s);
+                }
+                TokenType::Identifier => {
+                    let s = t.text().to_string();
+                    self.bump();
+                    return Expr::Ident(s);
+                }
+                _ => {}
+            }
+        }
+
+        self.err_custom_here("E3200", "expected expression");
+        // 防止死循环：尽量前进一个 token
+        if !self.at_end() {
+            self.bump();
+        }
+        Expr::Ident("_error".into())
+    }
+
+    fn parse_call_args(&mut self) -> Vec<Expr> {
+        // assumes current token is '('
+        self.expect_punct("(");
+        let mut args = Vec::new();
+        self.skip_trivia();
+        if self.cur_text_is(")") {
+            self.bump();
+            return args;
+        }
+
+        loop {
+            let start_i = self.i;
+            args.push(self.parse_expr_bp(0));
+            self.skip_trivia();
+
+            if self.cur_text_is(")") {
+                self.bump();
+                break;
+            }
+
+            if self.cur_text_is(",") {
+                self.bump();
+                self.skip_trivia();
+                if self.cur_text_is(")") {
+                    // allow trailing comma
+                    self.bump();
+                    break;
+                }
+            } else {
+                self.err_custom_here("E3304", "expected ',' or ')' in argument list");
+                // progress guard
+                if self.i == start_i {
+                    self.sync();
+                }
+                // best effort recovery: stop at ')'
+                while !self.at_end() && !self.cur_text_is(")") {
+                    self.i += 1;
+                }
+                if self.cur_text_is(")") {
+                    self.bump();
+                }
+                break;
+            }
+        }
+
+        args
+    }
+    }
         self.err_custom_here("E2301", "expected expression");
         Expr::Ident("_err".into())
     }
