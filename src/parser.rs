@@ -1975,22 +1975,8 @@ impl Parser {
                 continue;
             }
             if self.cur_text_is("(") {
-                // function call: only supports identifier callee in current AST
                 let args = self.parse_call_args();
-                lhs = match lhs {
-                    Expr::Ident(name) => Expr::Call { callee: name, args },
-                    other => {
-                        self.err_custom_span(
-                            "E3301",
-                            "call expression currently supports only identifier callee".into(),
-                            self.cur_span(),
-                        );
-                        Expr::Call {
-                            callee: "<expr>".into(),
-                            args,
-                        }
-                    }
-                };
+                lhs = Expr::CallExpr { callee: Box::new(lhs), args };
                 continue;
             }
             if self.cur_text_is("[") {
@@ -3090,6 +3076,17 @@ pub fn stringify_items(items: &[Item]) -> String {
             }
             Expr::Call { callee, args } => {
                 out.push_str(callee);
+                out.push('(');
+                for (i, a) in args.iter().enumerate() {
+                    if i > 0 {
+                        out.push_str(", ");
+                    }
+                    fmt_expr(a, 0, out);
+                }
+                out.push(')');
+            }
+            Expr::CallExpr { callee, args } => {
+                fmt_expr(callee, 0, out);
                 out.push('(');
                 for (i, a) in args.iter().enumerate() {
                     if i > 0 {
