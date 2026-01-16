@@ -2354,12 +2354,7 @@ impl Parser {
                 break;
             }
         }
-
         args
-    }
-    }
-        self.err_custom_here("E2301", "expected expression");
-        Expr::Ident("_err".into())
     }
 
     /* ============ 数组初始化器校验 ============ */
