@@ -13,6 +13,7 @@ pub enum Expr {
     Binary { op: String, lhs: Box<Expr>, rhs: Box<Expr> },
     Unary { op: String, expr: Box<Expr> }, // + - ! ~ & *
     Call { callee: String, args: Vec<Expr> },
+    CallExpr { callee: Box<Expr>, args: Vec<Expr> },
     Assign { op: String, lhs: Box<Expr>, rhs: Box<Expr> },
     Ternary { cond: Box<Expr>, then_e: Box<Expr>, else_e: Box<Expr> },
     PostInc(Box<Expr>),
