@@ -12,7 +12,6 @@ pub enum Expr {
     Ident(String),
     Binary { op: String, lhs: Box<Expr>, rhs: Box<Expr> },
     Unary { op: String, expr: Box<Expr> }, // + - ! ~ & *
-    Call { callee: String, args: Vec<Expr> },
     CallExpr { callee: Box<Expr>, args: Vec<Expr> },
     Assign { op: String, lhs: Box<Expr>, rhs: Box<Expr> },
     Ternary { cond: Box<Expr>, then_e: Box<Expr>, else_e: Box<Expr> },
@@ -3068,17 +3067,6 @@ pub fn stringify_items(items: &[Item]) -> String {
                 fmt_expr(lhs, 0, out);
                 out.push_str(&format!(" {} ", op));
                 fmt_expr(rhs, 0, out);
-                out.push(')');
-            }
-            Expr::Call { callee, args } => {
-                out.push_str(callee);
-                out.push('(');
-                for (i, a) in args.iter().enumerate() {
-                    if i > 0 {
-                        out.push_str(", ");
-                    }
-                    fmt_expr(a, 0, out);
-                }
                 out.push(')');
             }
             Expr::CallExpr { callee, args } => {
