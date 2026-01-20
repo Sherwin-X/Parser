@@ -2041,6 +2041,11 @@ impl Parser {
                     };
                 }
                 InfixKind::Assign => {
+                    self.skip_trivia();
+                    if self.expr_stops_here() {
+                        self.err_custom_here("E3312", &format!("expected expression after assignment operator '{}'", op));
+                        break;
+                    }
                     let rhs = self.parse_expr_bp(r_bp);
                     lhs = Expr::Assign {
                         op,
@@ -2053,8 +2058,23 @@ impl Parser {
                     let then_e = self.parse_expr_bp(0);
                     if !self.cur_text_is(":") {
                         self.err_custom_here("E3310", "expected ':' in ternary expression");
+                        // recovery: skip until ':' or a terminator
+                        while !self.at_end() && !self.cur_text_is(":") && !self.expr_stops_here() {
+                            self.i += 1;
+                        }
+                        if self.cur_text_is(":") {
+                            self.bump();
+                        } else {
+                            // cannot recover ternary, keep lhs
+                            break;
+                        }
                     } else {
                         self.bump();
+                    }
+                    self.skip_trivia();
+                    if self.expr_stops_here() {
+                        self.err_custom_here("E3314", "expected expression after ':' in ternary expression");
+                        break;
                     }
                     let else_e = self.parse_expr_bp(r_bp);
                     lhs = Expr::Ternary {
@@ -2064,6 +2084,11 @@ impl Parser {
                     };
                 }
                 InfixKind::Binary => {
+                    self.skip_trivia();
+                    if self.expr_stops_here() {
+                        self.err_custom_here("E3313", &format!("expected expression after operator '{}'", op));
+                        break;
+                    }
                     let rhs = self.parse_expr_bp(r_bp);
                     lhs = Expr::Binary {
                         op,
@@ -2077,7 +2102,24 @@ impl Parser {
         lhs
     }
 
-    fn peek_infix_bp(&self) -> Option<(String, u8, u8, InfixKind)> {
+    
+    /// True if the next token cannot start an expression (common terminators).
+    fn expr_stops_here(&self) -> bool {
+        if self.at_end() {
+            return true;
+        }
+        let t = self.cur().unwrap();
+        match t.kind() {
+            TokenType::Punctuation => matches!(
+                t.text(),
+                ";" | ")" | "]" | "}" | "," | ":"
+            ),
+            TokenType::Keyword => matches!(t.text(), "case" | "default"),
+            _ => false,
+        }
+    }
+
+fn peek_infix_bp(&self) -> Option<(String, u8, u8, InfixKind)> {
         let t = self.cur()?;
         let op = t.text();
 
