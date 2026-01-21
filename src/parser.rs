@@ -163,6 +163,22 @@ impl ParseError {
         const TAB_WIDTH: usize = 4;
         const MAX_WIDTH: usize = 140;
 
+use std::sync::OnceLock;
+
+fn max_errors() -> usize {
+    static MAX: OnceLock<usize> = OnceLock::new();
+    *MAX.get_or_init(|| {
+        // Allow override via env var for easier debugging.
+        // Example: PARSER_MAX_ERRORS=200 cargo run -- ...
+        std::env::var("PARSER_MAX_ERRORS")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .filter(|&n| n >= 1 && n <= 10_000)
+            .unwrap_or(50)
+    })
+}
+
+
         fn expand_tabs(s: &str) -> String {
             let mut out = String::with_capacity(s.len());
             let mut col = 0usize;
@@ -283,8 +299,8 @@ impl ParseError {
 }
 
 
-const MAX_ERRORS: usize = 50;
-const MAX_ERRORS_BEFORE_ABORT: usize = MAX_ERRORS - 1;
+
+const max_errors()_BEFORE_ABORT: usize = max_errors() - 1;
 /* ===================== Parser ===================== */
 
 pub struct Parser {
@@ -460,14 +476,14 @@ impl Parser {
         self.seen_errors.insert(key);
 
         // Reserve the last slot for a final "too many errors" message.
-        if self.errors.len() >= MAX_ERRORS_BEFORE_ABORT {
+        if self.errors.len() >= max_errors()_BEFORE_ABORT {
             self.aborted = true;
 
             // Best-effort: attach the abort message to the current location.
             let line_text = self.line_text_at(span);
             self.errors.push(ParseError {
                 code: "E9999",
-                message: format!("too many errors (>{}), aborting parse", MAX_ERRORS_BEFORE_ABORT),
+                message: format!("too many errors (>{}), aborting parse", max_errors()_BEFORE_ABORT),
                 span,
                 line_text,
                 prev_line: if span.line > 1 {
