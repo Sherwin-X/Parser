@@ -155,6 +155,7 @@ pub struct ParseError {
     pub prev_line: Option<(usize, String)>,
     /// Optional context line after `span.line`.
     pub next_line: Option<(usize, String)>,
+    pub help: Option<String>,
 }
 
 impl ParseError {
@@ -172,7 +173,8 @@ impl ParseError {
                         let spaces = next.saturating_sub(col).max(1);
                         out.extend(std::iter::repeat(' ').take(spaces));
                         col = next;
-                    }
+            help: None,
+        }
                     _ => {
                         out.push(ch);
                         col += 1;
@@ -269,9 +271,13 @@ impl ParseError {
 
         if let Some((ln, txt)) = &self.next_line {
             let t = expand_tabs(txt.trim_end_matches(&['\r', '\n'][..]));
-            out.push_str(&format!("{}{}\n", mk_prefix(*ln), t));
+            out.push_str(&let mut out = format!("{}{}\n", mk_prefix(*ln), t));
         }
 
+        out
+        if let Some(h) = &self.help {
+            out.push_str(&format!("help: {}\n", h));
+        }
         out
     }
 }
@@ -429,6 +435,23 @@ impl Parser {
             return;
         }
 
+    fn err_push_help(&mut self, code: &'static str, msg: String, span: Span, help: Option<String>) {
+        // go through de-dup path if present; otherwise fall back to plain push
+        // Prefer existing err_push_dedup / err_push if available
+        if let Some(h) = help {
+            let line_text = self.line_text_at(span.line);
+            self.errors.push(ParseError {
+                code,
+                message: msg,
+                span,
+                line_text,
+                help: Some(h),
+            });
+        } else {
+            self.err_push(code, msg, span);
+        }
+    }
+
         // Deduplicate repeated errors at the same span (common during recovery).
         let key = (code.to_string(), span.idx, span.len);
         if self.seen_errors.contains(&key) {
@@ -449,7 +472,8 @@ impl Parser {
                 line_text,
                 prev_line: if span.line > 1 {
                     Some((span.line - 1, self.line_text_by_no(span.line - 1)))
-                } else {
+            help: None,
+        } else {
                     None
                 },
                 next_line: Some((span.line + 1, self.line_text_by_no(span.line + 1)))
@@ -469,7 +493,8 @@ impl Parser {
             line_text,
             prev_line: if span.line > 1 {
                 Some((span.line - 1, self.line_text_by_no(span.line - 1)))
-            } else {
+            help: None,
+        } else {
                 None
             },
             next_line: Some((span.line + 1, self.line_text_by_no(span.line + 1)))
