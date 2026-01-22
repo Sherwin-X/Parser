@@ -1,4 +1,19 @@
 use crate::token::{Token, TokenType, Span};
+use std::sync::OnceLock;
+
+
+fn default_max_errors() -> usize {
+    static MAX: OnceLock<usize> = OnceLock::new();
+    *MAX.get_or_init(|| {
+        std::env::var("PARSER_MAX_ERRORS")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .filter(|&n| n >= 1 && n <= 10_000)
+            .unwrap_or(50)
+    })
+}
+
+
 use std::collections::{HashMap, HashSet};
 
 /* ===================== AST ===================== */
@@ -163,21 +178,6 @@ impl ParseError {
         const TAB_WIDTH: usize = 4;
         const MAX_WIDTH: usize = 140;
 
-use std::sync::OnceLock;
-
-fn default_max_errors() -> usize {
-    static MAX: OnceLock<usize> = OnceLock::new();
-    *MAX.get_or_init(|| {
-        // Allow override via env var for easier debugging.
-        // Example: PARSER_MAX_ERRORS=200 cargo run -- ...
-        std::env::var("PARSER_MAX_ERRORS")
-            .ok()
-            .and_then(|v| v.parse::<usize>().ok())
-            .filter(|&n| n >= 1 && n <= 10_000)
-            .unwrap_or(50)
-    })
-}
-
 
         fn expand_tabs(s: &str) -> String {
             let mut out = String::with_capacity(s.len());
@@ -189,8 +189,6 @@ fn default_max_errors() -> usize {
                         let spaces = next.saturating_sub(col).max(1);
                         out.extend(std::iter::repeat(' ').take(spaces));
                         col = next;
-            help: None,
-        }
                     _ => {
                         out.push(ch);
                         col += 1;
@@ -287,10 +285,9 @@ fn default_max_errors() -> usize {
 
         if let Some((ln, txt)) = &self.next_line {
             let t = expand_tabs(txt.trim_end_matches(&['\r', '\n'][..]));
-            out.push_str(&let mut out = format!("{}{}\n", mk_prefix(*ln), t));
+            out.push_str(&format!("{}{}\n", mk_prefix(*ln), t));
         }
 
-        out
         if let Some(h) = &self.help {
             out.push_str(&format!("help: {}\n", h));
         }
@@ -299,8 +296,6 @@ fn default_max_errors() -> usize {
 }
 
 
-
-const self.max_errors_limit_BEFORE_ABORT: usize = self.max_errors_limit - 1;
 /* ===================== Parser ===================== */
 
 pub struct Parser {
@@ -355,6 +350,12 @@ impl Parser {
         p.set_max_errors(limit);
         p
     }
+
+    /// Get the current maximum error limit (after which parsing aborts).
+    pub fn max_errors_limit(&self) -> usize {
+        self.max_errors_limit
+    }
+
 
     pub fn new(tokens: Vec<Token>, source: String) -> Self {
         Self {
@@ -492,24 +493,27 @@ impl Parser {
         self.seen_errors.insert(key);
 
         // Reserve the last slot for a final "too many errors" message.
-        if self.errors.len() >= self.max_errors_limit_BEFORE_ABORT {
+        if self.errors.len() >= self.max_errors_limit.saturating_sub(1) {
             self.aborted = true;
 
             // Best-effort: attach the abort message to the current location.
             let line_text = self.line_text_at(span);
             self.errors.push(ParseError {
                 code: "E9999",
-                message: format!("too many errors (>{}), aborting parse", self.max_errors_limit_BEFORE_ABORT),
+                message: format!("too many errors (limit {}), aborting parse", self.max_errors_limit),
                 span,
                 line_text,
                 prev_line: if span.line > 1 {
                     Some((span.line - 1, self.line_text_by_no(span.line - 1)))
-            help: None,
-        } else {
+                } else {
                     None
                 },
                 next_line: Some((span.line + 1, self.line_text_by_no(span.line + 1)))
                     .filter(|(_, s)| !s.is_empty()),
+                help: Some(
+                    "Set PARSER_MAX_ERRORS or call Parser::set_max_errors(...) to adjust the limit."
+                        .into(),
+                ),
             });
 
             // Force parsing loops to stop cleanly.
