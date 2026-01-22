@@ -165,7 +165,7 @@ impl ParseError {
 
 use std::sync::OnceLock;
 
-fn max_errors() -> usize {
+fn default_max_errors() -> usize {
     static MAX: OnceLock<usize> = OnceLock::new();
     *MAX.get_or_init(|| {
         // Allow override via env var for easier debugging.
@@ -300,7 +300,7 @@ fn max_errors() -> usize {
 
 
 
-const max_errors()_BEFORE_ABORT: usize = max_errors() - 1;
+const self.max_errors_limit_BEFORE_ABORT: usize = self.max_errors_limit - 1;
 /* ===================== Parser ===================== */
 
 pub struct Parser {
@@ -308,6 +308,7 @@ pub struct Parser {
     i: usize,
     source: String,
     line_starts: Vec<usize>,
+    max_errors_limit: usize,
     pub errors: Vec<ParseError>,
 
     seen_errors: HashSet<(String, usize, usize)>,
@@ -341,12 +342,27 @@ enum InfixKind {
 }
 
 impl Parser {
+
+    /// Override the maximum number of parser errors before aborting further parsing.
+    /// Useful for test harnesses or batch runs.
+    pub fn set_max_errors(&mut self, limit: usize) {
+        self.max_errors_limit = limit.max(1);
+    }
+
+    /// Construct a parser with a custom maximum error limit (default is read from PARSER_MAX_ERRORS or 50).
+    pub fn with_max_errors(tokens: Vec<Token>, source: String, limit: usize) -> Self {
+        let mut p = Self::new(tokens, source);
+        p.set_max_errors(limit);
+        p
+    }
+
     pub fn new(tokens: Vec<Token>, source: String) -> Self {
         Self {
             tokens,
             i: 0,
             source,
             line_starts: build_line_starts(&source),
+            max_errors_limit: default_max_errors(),
             errors: vec![],
             seen_errors: HashSet::new(),
             aborted: false,
@@ -476,14 +492,14 @@ impl Parser {
         self.seen_errors.insert(key);
 
         // Reserve the last slot for a final "too many errors" message.
-        if self.errors.len() >= max_errors()_BEFORE_ABORT {
+        if self.errors.len() >= self.max_errors_limit_BEFORE_ABORT {
             self.aborted = true;
 
             // Best-effort: attach the abort message to the current location.
             let line_text = self.line_text_at(span);
             self.errors.push(ParseError {
                 code: "E9999",
-                message: format!("too many errors (>{}), aborting parse", max_errors()_BEFORE_ABORT),
+                message: format!("too many errors (>{}), aborting parse", self.max_errors_limit_BEFORE_ABORT),
                 span,
                 line_text,
                 prev_line: if span.line > 1 {
