@@ -356,6 +356,17 @@ impl Parser {
         self.max_errors_limit
     }
 
+    /// Whether parsing was aborted due to too many errors.
+    pub fn aborted(&self) -> bool {
+        self.aborted
+    }
+
+    /// Number of errors collected so far.
+    pub fn error_count(&self) -> usize {
+        self.errors.len()
+    }
+
+
 
     pub fn new(tokens: Vec<Token>, source: String) -> Self {
         Self {
