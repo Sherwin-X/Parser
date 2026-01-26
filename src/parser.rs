@@ -361,6 +361,17 @@ impl Parser {
         self.aborted
     }
 
+    /// Whether any parser errors were recorded.
+    pub fn has_errors(&self) -> bool {
+        !self.errors.is_empty()
+    }
+
+    /// Take ownership of accumulated errors (leaves the parser with an empty error list).
+    pub fn take_errors(&mut self) -> Vec<ParseError> {
+        std::mem::take(&mut self.errors)
+    }
+
+
     /// Number of errors collected so far.
     pub fn error_count(&self) -> usize {
         self.errors.len()
