@@ -371,6 +371,16 @@ impl Parser {
         std::mem::take(&mut self.errors)
     }
 
+    /// Convenience helper: parse all items and return (items, errors, aborted).
+    /// Useful for callers that prefer a single return value rather than inspecting parser state.
+    pub fn parse_result(mut self) -> (Vec<Item>, Vec<ParseError>, bool) {
+        let items = self.parse_items();
+        let aborted = self.aborted;
+        let errors = self.errors;
+        (items, errors, aborted)
+    }
+
+
 
     /// Number of errors collected so far.
     pub fn error_count(&self) -> usize {
