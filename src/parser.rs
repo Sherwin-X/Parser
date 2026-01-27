@@ -387,6 +387,16 @@ impl Parser {
         self.errors.len()
     }
 
+    /// Count errors by error code (stable ordering).
+    pub fn error_stats(&self) -> std::collections::BTreeMap<&'static str, usize> {
+        let mut map: std::collections::BTreeMap<&'static str, usize> = std::collections::BTreeMap::new();
+        for e in &self.errors {
+            *map.entry(e.code).or_insert(0) += 1;
+        }
+        map
+    }
+
+
 
 
     pub fn new(tokens: Vec<Token>, source: String) -> Self {
