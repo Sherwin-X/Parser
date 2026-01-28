@@ -393,6 +393,29 @@ impl Parser {
         for e in &self.errors {
             *map.entry(e.code).or_insert(0) += 1;
         }
+
+    /// Render all accumulated errors into a single string (useful for tests/logging).
+    /// If `include_stats` is true, a short per-code summary is prepended.
+    pub fn format_errors(&self, include_stats: bool) -> String {
+        let mut out = String::new();
+
+        if include_stats && !self.errors.is_empty() {
+            out.push_str("== Parser error stats ==\n");
+            for (code, n) in self.error_stats() {
+                out.push_str(&format!("{code}: {n}\n"));
+            }
+            out.push('\n');
+        }
+
+        for e in &self.errors {
+            out.push_str(&e.render());
+            if !out.ends_with('\n') {
+                out.push('\n');
+            }
+        }
+        out
+    }
+
         map
     }
 
