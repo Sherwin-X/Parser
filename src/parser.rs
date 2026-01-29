@@ -295,6 +295,15 @@ impl ParseError {
     }
 }
 
+impl ParseError {
+    /// Compact single-line representation: CODE line:col message
+    pub fn compact(&self) -> String {
+        format!("{} {}:{} {}", self.code, self.span.line, self.span.col, self.message)
+    }
+}
+
+
+
 
 /* ===================== Parser ===================== */
 
@@ -404,6 +413,17 @@ impl Parser {
             for (code, n) in self.error_stats() {
                 out.push_str(&format!("{code}: {n}\n"));
             }
+
+    /// Render errors in a compact, one-line-per-error format (easy to diff in tests).
+    pub fn format_errors_compact(&self) -> String {
+        let mut out = String::new();
+        for e in &self.errors {
+            out.push_str(&e.compact());
+            out.push('\n');
+        }
+        out
+    }
+
             out.push('\n');
         }
 
