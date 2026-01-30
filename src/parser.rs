@@ -421,6 +421,24 @@ impl Parser {
             out.push_str(&e.compact());
             out.push('\n');
         }
+
+    /// Render errors in a compact format, but sorted by source position (line/col),
+    /// to keep output stable even if recovery changes error emission order.
+    pub fn format_errors_compact_sorted(&self) -> String {
+        let mut idxs: Vec<usize> = (0..self.errors.len()).collect();
+        idxs.sort_by_key(|&i| {
+            let sp = self.errors[i].span;
+            (sp.line, sp.col, sp.idx, self.errors[i].code)
+        });
+
+        let mut out = String::new();
+        for i in idxs {
+            out.push_str(&self.errors[i].compact());
+            out.push('\n');
+        }
+        out
+    }
+
         out
     }
 
