@@ -300,6 +300,11 @@ impl ParseError {
     pub fn compact(&self) -> String {
         format!("{} {}:{} {}", self.code, self.span.line, self.span.col, self.message)
     }
+
+    /// Stable key for sorting/deduping errors by source position.
+    pub fn sort_key(&self) -> (usize, usize, usize, &'static str) {
+        (self.span.line, self.span.col, self.span.idx, self.code)
+    }
 }
 
 
@@ -426,10 +431,7 @@ impl Parser {
     /// to keep output stable even if recovery changes error emission order.
     pub fn format_errors_compact_sorted(&self) -> String {
         let mut idxs: Vec<usize> = (0..self.errors.len()).collect();
-        idxs.sort_by_key(|&i| {
-            let sp = self.errors[i].span;
-            (sp.line, sp.col, sp.idx, self.errors[i].code)
-        });
+        idxs.sort_by_key(|&i| self.errors[i].sort_key());
 
         let mut out = String::new();
         for i in idxs {
