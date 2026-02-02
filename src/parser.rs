@@ -320,7 +320,7 @@ pub struct Parser {
     max_errors_limit: usize,
     pub errors: Vec<ParseError>,
 
-    seen_errors: HashSet<(String, usize, usize)>,
+    seen_errors: HashSet<(usize, usize, usize, &'static str)>,
 
     aborted: bool,
 
@@ -591,7 +591,7 @@ impl Parser {
     }
 
         // Deduplicate repeated errors at the same span (common during recovery).
-        let key = (code.to_string(), span.idx, span.len);
+        let key = (span.line, span.col, span.idx, code);
         if self.seen_errors.contains(&key) {
             return;
         }
