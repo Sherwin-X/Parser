@@ -568,29 +568,13 @@ impl Parser {
             .to_string()
     }
 
-    fn err_push(&mut self, code: &'static str, message: String, span: Span) {
+    
+    fn push_error(&mut self, code: &'static str, message: String, span: Span, help: Option<String>) {
         if self.aborted {
             return;
         }
 
-    fn err_push_help(&mut self, code: &'static str, msg: String, span: Span, help: Option<String>) {
-        // go through de-dup path if present; otherwise fall back to plain push
-        // Prefer existing err_push_dedup / err_push if available
-        if let Some(h) = help {
-            let line_text = self.line_text_at(span.line);
-            self.errors.push(ParseError {
-                code,
-                message: msg,
-                span,
-                line_text,
-                help: Some(h),
-            });
-        } else {
-            self.err_push(code, msg, span);
-        }
-    }
-
-        // Deduplicate repeated errors at the same span (common during recovery).
+        // Deduplicate repeated errors at the same position (common during recovery).
         let key = (span.line, span.col, span.idx, code);
         if self.seen_errors.contains(&key) {
             return;
@@ -601,19 +585,23 @@ impl Parser {
         if self.errors.len() >= self.max_errors_limit.saturating_sub(1) {
             self.aborted = true;
 
-            // Best-effort: attach the abort message to the current location.
-            let line_text = self.line_text_at(span);
+            let abort_span = span;
+            let abort_line_text = self.line_text_at(abort_span);
+
             self.errors.push(ParseError {
                 code: "E9999",
-                message: format!("too many errors (limit {}), aborting parse", self.max_errors_limit),
-                span,
-                line_text,
-                prev_line: if span.line > 1 {
-                    Some((span.line - 1, self.line_text_by_no(span.line - 1)))
+                message: format!(
+                    "too many errors (limit {}), aborting parse",
+                    self.max_errors_limit
+                ),
+                span: abort_span,
+                line_text: abort_line_text,
+                prev_line: if abort_span.line > 1 {
+                    Some((abort_span.line - 1, self.line_text_by_no(abort_span.line - 1)))
                 } else {
                     None
                 },
-                next_line: Some((span.line + 1, self.line_text_by_no(span.line + 1)))
+                next_line: Some((abort_span.line + 1, self.line_text_by_no(abort_span.line + 1)))
                     .filter(|(_, s)| !s.is_empty()),
                 help: Some(
                     "Set PARSER_MAX_ERRORS or call Parser::set_max_errors(...) to adjust the limit."
@@ -634,14 +622,24 @@ impl Parser {
             line_text,
             prev_line: if span.line > 1 {
                 Some((span.line - 1, self.line_text_by_no(span.line - 1)))
-            help: None,
-        } else {
+            } else {
                 None
             },
             next_line: Some((span.line + 1, self.line_text_by_no(span.line + 1)))
                 .filter(|(_, s)| !s.is_empty()),
+            help,
         });
     }
+
+    fn err_push(&mut self, code: &'static str, message: String, span: Span) {
+        self.push_error(code, message, span, None);
+    }
+
+    fn err_push_help(&mut self, code: &'static str, message: String, span: Span, help: Option<String>) {
+        self.push_error(code, message, span, help);
+    }
+
+
 
     fn err_expect(&mut self, expected: &str) {
         let span = self.cur_span();
