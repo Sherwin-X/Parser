@@ -394,6 +394,18 @@ impl Parser {
         (items, errors, aborted)
     }
 
+    /// Parse and return Ok(items) if no errors were produced; otherwise returns Err(errors).
+    /// Note: if parsing aborted due to too many errors, this will also return Err(errors).
+    pub fn parse_or_errors(self) -> Result<Vec<Item>, Vec<ParseError>> {
+        let (items, errors, _aborted) = self.parse_result();
+        if errors.is_empty() {
+            Ok(items)
+        } else {
+            Err(errors)
+        }
+    }
+
+
 
 
     /// Number of errors collected so far.
