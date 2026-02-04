@@ -15,6 +15,7 @@ fn default_max_errors() -> usize {
 
 
 use std::collections::{HashMap, HashSet};
+use std::fmt;
 
 /* ===================== AST ===================== */
 
@@ -294,6 +295,16 @@ impl ParseError {
         out
     }
 }
+
+impl fmt::Display for ParseError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Keep Display concise; use render() when you want full, multi-line diagnostics.
+        write!(f, "{}", self.compact())
+    }
+}
+
+impl std::error::Error for ParseError {}
+
 
 impl ParseError {
     /// Compact single-line representation: CODE line:col message
