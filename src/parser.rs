@@ -452,6 +452,14 @@ impl Parser {
             for (code, n) in self.error_stats() {
                 out.push_str(&format!("{code}: {n}\n"));
             }
+
+    /// Get errors sorted by source position (line/col/idx/code).
+    pub fn errors_sorted(&self) -> Vec<&ParseError> {
+        let mut v: Vec<&ParseError> = self.errors.iter().collect();
+        v.sort_by_key(|e| e.sort_key());
+        v
+    }
+
             out.push('\n');
         }
 
