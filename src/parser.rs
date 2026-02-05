@@ -442,6 +442,32 @@ impl Parser {
                 out.push_str(&format!("{code}: {n}\n"));
             }
 
+    /// Render full multi-line errors, sorted by source position (line/col/idx/code).
+    /// This keeps output stable for test diffs even if recovery changes emission order.
+    pub fn format_errors_sorted(&self, include_stats: bool) -> String {
+        let mut out = String::new();
+
+        if include_stats && !self.errors.is_empty() {
+            out.push_str("== Parser error stats ==\n");
+            for (code, n) in self.error_stats() {
+                out.push_str(&format!("{code}: {n}\n"));
+            }
+            out.push('\n');
+        }
+
+        let mut idxs: Vec<usize> = (0..self.errors.len()).collect();
+        idxs.sort_by_key(|&i| self.errors[i].sort_key());
+
+        for i in idxs {
+            out.push_str(&self.errors[i].render());
+            if !out.ends_with('\n') {
+                out.push('\n');
+            }
+        }
+        out
+    }
+
+
     /// Render errors in a compact, one-line-per-error format (easy to diff in tests).
     pub fn format_errors_compact(&self) -> String {
         let mut out = String::new();
