@@ -460,6 +460,17 @@ impl Parser {
         v
     }
 
+    /// First error in source order, if any.
+    pub fn first_error(&self) -> Option<&ParseError> {
+        self.errors_sorted().into_iter().next()
+    }
+
+    /// Last error in source order, if any.
+    pub fn last_error(&self) -> Option<&ParseError> {
+        self.errors_sorted().into_iter().last()
+    }
+
+
             out.push('\n');
         }
 
