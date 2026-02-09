@@ -431,6 +431,13 @@ impl Parser {
             *map.entry(e.code).or_insert(0) += 1;
         }
 
+    fn sorted_error_indices(&self) -> Vec<usize> {
+        let idxs = self.sorted_error_indices();
+
+        idxs
+    }
+
+
     /// Render all accumulated errors into a single string (useful for tests/logging).
     /// If `include_stats` is true, a short per-code summary is prepended.
     pub fn format_errors(&self, include_stats: bool) -> String {
@@ -455,8 +462,11 @@ impl Parser {
 
     /// Get errors sorted by source position (line/col/idx/code).
     pub fn errors_sorted(&self) -> Vec<&ParseError> {
-        let mut v: Vec<&ParseError> = self.errors.iter().collect();
-        v.sort_by_key(|e| e.sort_key());
+        let idxs = self.sorted_error_indices();
+        let mut v = Vec::with_capacity(idxs.len());
+        for i in idxs {
+            v.push(&self.errors[i]);
+        }
         v
     }
 
@@ -476,8 +486,7 @@ impl Parser {
             out.push('\n');
         }
 
-        let mut idxs: Vec<usize> = (0..self.errors.len()).collect();
-        idxs.sort_by_key(|&i| self.errors[i].sort_key());
+        let idxs = self.sorted_error_indices();
 
         for i in idxs {
             out.push_str(&self.errors[i].render());
@@ -500,8 +509,7 @@ impl Parser {
     /// Render errors in a compact format, but sorted by source position (line/col),
     /// to keep output stable even if recovery changes error emission order.
     pub fn format_errors_compact_sorted(&self) -> String {
-        let mut idxs: Vec<usize> = (0..self.errors.len()).collect();
-        idxs.sort_by_key(|&i| self.errors[i].sort_key());
+        let idxs = self.sorted_error_indices();
 
         let mut out = String::new();
         for i in idxs {
