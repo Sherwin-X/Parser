@@ -462,12 +462,14 @@ impl Parser {
 
     /// First error in source order, if any.
     pub fn first_error(&self) -> Option<&ParseError> {
-        self.errors_sorted().into_iter().next()
+        // O(n) without allocation/sort
+        self.errors.iter().min_by_key(|e| e.sort_key())
     }
 
     /// Last error in source order, if any.
     pub fn last_error(&self) -> Option<&ParseError> {
-        self.errors_sorted().into_iter().last()
+        // O(n) without allocation/sort
+        self.errors.iter().max_by_key(|e| e.sort_key())
     }
 
 
