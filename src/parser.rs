@@ -15,6 +15,7 @@ fn default_max_errors() -> usize {
 
 
 use std::collections::{HashMap, HashSet};
+use std::cell::RefCell;
 use std::fmt;
 
 /* ===================== AST ===================== */
@@ -332,6 +333,7 @@ pub struct Parser {
     pub errors: Vec<ParseError>,
 
     seen_errors: HashSet<(usize, usize, usize, &'static str)>,
+    sorted_errors_cache: RefCell<Option<Vec<usize>>>,
 
     aborted: bool,
 
@@ -393,6 +395,7 @@ impl Parser {
 
     /// Take ownership of accumulated errors (leaves the parser with an empty error list).
     pub fn take_errors(&mut self) -> Vec<ParseError> {
+        *self.sorted_errors_cache.borrow_mut() = None;
         std::mem::take(&mut self.errors)
     }
 
@@ -549,6 +552,7 @@ impl Parser {
             max_errors_limit: default_max_errors(),
             errors: vec![],
             seen_errors: HashSet::new(),
+            sorted_errors_cache: RefCell::new(None),
             aborted: false,
             typedefs: HashSet::new(),
         }
@@ -686,6 +690,7 @@ impl Parser {
                         .into(),
                 ),
             });
+        *self.sorted_errors_cache.borrow_mut() = None;
 
             // Force parsing loops to stop cleanly.
             self.i = self.tokens.len();
