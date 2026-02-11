@@ -16,6 +16,7 @@ fn default_max_errors() -> usize {
 
 use std::collections::{HashMap, HashSet};
 use std::cell::RefCell;
+use std::rc::Rc;
 use std::fmt;
 
 /* ===================== AST ===================== */
@@ -333,7 +334,7 @@ pub struct Parser {
     pub errors: Vec<ParseError>,
 
     seen_errors: HashSet<(usize, usize, usize, &'static str)>,
-    sorted_errors_cache: RefCell<Option<Vec<usize>>>,
+    sorted_errors_cache: RefCell<Option<Rc<Vec<usize>>>>,
 
     aborted: bool,
 
@@ -467,7 +468,7 @@ impl Parser {
     pub fn errors_sorted(&self) -> Vec<&ParseError> {
         let idxs = self.sorted_error_indices();
         let mut v = Vec::with_capacity(idxs.len());
-        for i in idxs {
+        for &i in idxs.iter() {
             v.push(&self.errors[i]);
         }
         v
@@ -491,7 +492,7 @@ impl Parser {
 
         let idxs = self.sorted_error_indices();
 
-        for i in idxs {
+        for &i in idxs.iter() {
             out.push_str(&self.errors[i].render());
             if !out.ends_with('\n') {
                 out.push('\n');
@@ -515,7 +516,7 @@ impl Parser {
         let idxs = self.sorted_error_indices();
 
         let mut out = String::new();
-        for i in idxs {
+        for &i in idxs.iter() {
             out.push_str(&self.errors[i].compact());
             out.push('\n');
         }
