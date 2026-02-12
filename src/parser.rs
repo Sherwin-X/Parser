@@ -471,6 +471,15 @@ impl Parser {
         for &i in idxs.iter() {
             v.push(&self.errors[i]);
         }
+
+    /// Call `f` for each error in stable source order without allocating a Vec of references.
+    pub fn for_each_error_sorted<F: FnMut(&ParseError)>(&self, mut f: F) {
+        let idxs = self.sorted_error_indices();
+        for &i in idxs.iter() {
+            f(&self.errors[i]);
+        }
+    }
+
         v
     }
 
