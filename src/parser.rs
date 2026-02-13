@@ -400,6 +400,16 @@ impl Parser {
         std::mem::take(&mut self.errors)
     }
 
+    /// Clear accumulated errors and reset related error-tracking state.
+    /// This does NOT reset the token stream position.
+    pub fn clear_errors(&mut self) {
+        self.errors.clear();
+        self.seen_errors.clear();
+        self.aborted = false;
+        *self.sorted_errors_cache.borrow_mut() = None;
+    }
+
+
     /// Convenience helper: parse all items and return (items, errors, aborted).
     /// Useful for callers that prefer a single return value rather than inspecting parser state.
     pub fn parse_result(mut self) -> (Vec<Item>, Vec<ParseError>, bool) {
