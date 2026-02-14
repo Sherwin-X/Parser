@@ -438,6 +438,17 @@ impl Parser {
         self.errors.len()
     }
 
+    /// Whether parsing aborted due to too many errors.
+    pub fn has_aborted(&self) -> bool {
+        self.aborted
+    }
+
+    /// True if no errors were produced and parsing did not abort.
+    pub fn is_clean(&self) -> bool {
+        self.errors.is_empty() && !self.aborted
+    }
+
+
     /// Count errors by error code (stable ordering).
     pub fn error_stats(&self) -> std::collections::BTreeMap<&'static str, usize> {
         let mut map: std::collections::BTreeMap<&'static str, usize> = std::collections::BTreeMap::new();
