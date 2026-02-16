@@ -448,6 +448,20 @@ impl Parser {
         self.errors.is_empty() && !self.aborted
     }
 
+    /// A short human-readable summary for logs: error count, aborted flag, and the first error (if any).
+    pub fn summary(&self) -> String {
+        if self.errors.is_empty() {
+            return "no parser errors".to_string();
+        }
+        let first = self.first_error().map(|e| e.compact()).unwrap_or_else(|| "<unknown>".to_string());
+        if self.aborted {
+            format!("{} errors (aborted): {}", self.errors.len(), first)
+        } else {
+            format!("{} errors: {}", self.errors.len(), first)
+        }
+    }
+
+
 
     /// Count errors by error code (stable ordering).
     pub fn error_stats(&self) -> std::collections::BTreeMap<&'static str, usize> {
