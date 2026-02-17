@@ -833,6 +833,56 @@ impl Parser {
                 return;
             }
 
+    /// Whether the current token can start a statement.
+    fn is_stmt_start(&self) -> bool {
+        if self.at_end() {
+            return false;
+        }
+        // Keywords that can begin a statement
+        if self.cur_is_kw("if")
+            || self.cur_is_kw("for")
+            || self.cur_is_kw("while")
+            || self.cur_is_kw("do")
+            || self.cur_is_kw("switch")
+            || self.cur_is_kw("return")
+            || self.cur_is_kw("break")
+            || self.cur_is_kw("continue")
+            || self.cur_is_kw("goto")
+        {
+            return true;
+        }
+        // Block start
+        if self.cur_is_punct("{") {
+            return true;
+        }
+        // A declaration can also start a statement (e.g., "int x;")
+        if self.peek_type_start() {
+            return true;
+        }
+        // Fallback: identifier could start an expression-statement
+        self.cur_is(&TokenType::Identifier)
+    }
+
+    /// Statement-level panic-mode recovery: skip tokens until a likely statement boundary.
+    /// This reduces cascade errors compared to token-level sync().
+    fn sync_stmt(&mut self) {
+        // Ensure we always make progress
+        if !self.at_end() {
+            self.i += 1;
+        }
+
+        while !self.at_end() {
+            if self.cur_is_punct(";") || self.cur_is_punct("}") {
+                return;
+            }
+            if self.is_stmt_start() {
+                return;
+            }
+            self.i += 1;
+        }
+    }
+
+
             // Do not consume closers / label separators: caller should decide how to unwind.
             if self.cur_is_punct("}")
                 || self.cur_is_punct(")")
