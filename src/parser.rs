@@ -872,6 +872,26 @@ impl Parser {
         }
 
         while !self.at_end() {
+            // Hard statement boundaries
+            if self.cur_is_punct(";") || self.cur_is_punct("}") {
+                return;
+            }
+
+            // Switch label boundaries
+            if self.cur_is_punct(":") || self.cur_is_kw("case") || self.cur_is_kw("default") {
+                return;
+            }
+
+            // Next likely statement start
+            if self.is_stmt_start() {
+                return;
+            }
+
+            self.i += 1;
+        }
+    }
+
+        while !self.at_end() {
             if self.cur_is_punct(";") || self.cur_is_punct("}") {
                 return;
             }
