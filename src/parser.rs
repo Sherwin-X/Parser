@@ -863,7 +863,22 @@ impl Parser {
         self.cur_is(&TokenType::Identifier)
     }
 
-    /// Statement-level panic-mode recovery: skip tokens until a likely statement boundary.
+        /// Whether the current token can end an expression (common recovery boundary).
+    fn is_expr_end(&self) -> bool {
+        if self.at_end() {
+            return true;
+        }
+        self.cur_is_punct(";")
+            || self.cur_is_punct(")")
+            || self.cur_is_punct("]")
+            || self.cur_is_punct("}")
+            || self.cur_is_punct(",")
+            || self.cur_is_punct(":")
+            || self.cur_is_kw("case")
+            || self.cur_is_kw("default")
+    }
+
+/// Statement-level panic-mode recovery: skip tokens until a likely statement boundary.
     /// This reduces cascade errors compared to token-level sync().
     fn sync_stmt(&mut self) {
         // Ensure we always make progress
@@ -2706,8 +2721,8 @@ fn peek_infix_bp(&self) -> Option<(String, u8, u8, InfixKind)> {
         }
 
         self.err_custom_here("E3200", "expected expression");
-        // 防止死循环：尽量前进一个 token
-        if !self.at_end() {
+        // 防止死循环：如果当前就是表达式终止符，就不要吞掉它，交给上层处理
+        if !self.is_expr_end() && !self.at_end() {
             self.bump();
         }
         Expr::Ident("_error".into())
