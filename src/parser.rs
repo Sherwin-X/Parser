@@ -784,6 +784,32 @@ impl Parser {
                 s.truncate(40);
                 s.push('…');
             }
+
+    fn err_expect_inserted(&mut self, expected: &str) {
+        let span = self.cur_span();
+        let got = if self.at_end() {
+            "EOF".to_string()
+        } else {
+            let t = &self.tokens[self.i];
+            let mut s = t.text().to_string();
+            s = s.replace('\n', "\\n")
+                 .replace('\r', "\\r")
+                 .replace('\t', "\\t");
+            if s.len() > 40 {
+                s.truncate(40);
+                s.push('…');
+            }
+            format!("{:?} '{}'", t.kind(), s)
+        };
+        // Note: we intentionally do NOT sync() here, treating the token as "inserted" for recovery.
+        self.err_push_help(
+            "E1001",
+            format!("expected {}, found {}", expected, got),
+            span,
+            Some(format!("assuming missing {} here", expected)),
+        );
+    }
+
             format!("{:?} '{}'", t.kind(), s)
         };
         self.err_push("E1001", format!("expected {}, found {}", expected, got), span);
@@ -801,11 +827,17 @@ impl Parser {
 
     fn expect_punct(&mut self, ch: &str) {
         if !self.cur_is_punct(ch) {
+            // Error production: treat common separators/closers as inserted to reduce cascade errors.
+            let insertable = matches!(ch, ")" | "]" | "}" | ";" | "," | ":");
+            if insertable && (self.is_expr_end() || self.cur_is_punct("}") || self.at_end()) {
+                self.err_expect_inserted(&format!("'{}'", ch));
+                return;
+            }
             self.err_expect(&format!("'{}'", ch));
         } else {
             self.bump();
         }
-    }
+    }    }
     fn expect_kw(&mut self, kw: &str) {
         if !self.cur_is_kw(kw) {
             self.err_expect(&format!("keyword '{}'", kw));
