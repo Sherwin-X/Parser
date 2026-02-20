@@ -880,6 +880,7 @@ impl Parser {
             || self.cur_is_kw("break")
             || self.cur_is_kw("continue")
             || self.cur_is_kw("goto")
+            || self.cur_is_kw("else")
         {
             return true;
         }
@@ -925,7 +926,7 @@ impl Parser {
             }
 
             // Switch label boundaries
-            if self.cur_is_punct(":") || self.cur_is_kw("case") || self.cur_is_kw("default") {
+            if self.cur_is_punct(":") || self.cur_is_kw("case") || self.cur_is_kw("default") || self.cur_is_kw("else") {
                 return;
             }
 
@@ -974,6 +975,7 @@ impl Parser {
                 || self.cur_is_kw("break")
                 || self.cur_is_kw("continue")
                 || self.cur_is_kw("goto")
+            || self.cur_is_kw("else")
                 || self.cur_is_kw("typedef")
                 || self.cur_is_kw("struct")
                 || self.cur_is_kw("union")
@@ -1054,6 +1056,7 @@ impl Parser {
                 || self.cur_is_kw("break")
                 || self.cur_is_kw("continue")
                 || self.cur_is_kw("goto")
+            || self.cur_is_kw("else")
             {
                 return;
             }
