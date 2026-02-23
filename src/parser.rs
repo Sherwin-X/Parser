@@ -803,8 +803,8 @@ impl Parser {
         };
         // Note: we intentionally do NOT sync() here, treating the token as "inserted" for recovery.
         self.err_push_help(
-            "E1001",
-            format!("expected {}, found {}", expected, got),
+            "E1002",
+            format!("expected {} (inserted), found {}", expected, got),
             span,
             Some(format!("assuming missing {} here", expected)),
         );
@@ -812,7 +812,7 @@ impl Parser {
 
             format!("{:?} '{}'", t.kind(), s)
         };
-        self.err_push("E1001", format!("expected {}, found {}", expected, got), span);
+        self.err_push("E1001", format!("expected {} (inserted), found {}", expected, got), span);
         self.sync();
     }
     fn err_custom_span(&mut self, code: &'static str, msg: String, span: Span) {
