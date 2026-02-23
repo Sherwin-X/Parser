@@ -2501,6 +2501,7 @@ impl Parser {
                     self.skip_trivia();
                     if self.expr_stops_here() {
                         self.err_custom_here("E3313", &format!("expected expression after operator '{}'", op));
+                        self.sync_expr();
                         break;
                     }
                     let rhs = self.parse_expr_bp(r_bp);
@@ -2522,6 +2523,16 @@ impl Parser {
         if self.at_end() {
             return true;
         }
+
+    /// Expression-level recovery: advance until an expression terminator, a statement start,
+    /// or EOF. Does NOT consume the terminator.
+    fn sync_expr(&mut self) {
+        while !self.at_end() && !self.expr_stops_here() && !self.is_stmt_start() {
+            self.bump();
+            self.skip_trivia();
+        }
+    }
+
         let t = self.cur().unwrap();
         match t.kind() {
             TokenType::Punctuation => matches!(
