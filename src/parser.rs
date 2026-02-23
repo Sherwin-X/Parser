@@ -770,7 +770,9 @@ impl Parser {
 
 
     fn err_expect(&mut self, expected: &str) {
-        let span = self.cur_span();
+        let mut span = self.cur_span();
+        // Point the caret at the insertion position rather than highlighting the current token.
+        span.len = 0;
         let got = if self.at_end() {
             "EOF".to_string()
         } else {
