@@ -1736,7 +1736,11 @@ impl Parser {
             if !self.cur_is_punct("]") {
                 self.err_custom_here("E3002", "unterminated array dimension, expected ']'");
             }
-            self.expect_punct("]");
+            if self.at_end() {
+                        self.err_expect_inserted("']'");
+                    } else {
+                        self.expect_punct("]");
+                    }
             dims.push(dim);
         }
         dims
@@ -2816,6 +2820,8 @@ fn peek_infix_bp(&self) -> Option<(String, u8, u8, InfixKind)> {
                 }
                 if self.cur_text_is(")") {
                     self.bump();
+                } else if self.at_end() {
+                    self.err_expect_inserted("')'");
                 }
                 break;
             }
