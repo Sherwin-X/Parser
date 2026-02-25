@@ -318,6 +318,12 @@ impl ParseError {
     pub fn sort_key(&self) -> (usize, usize, usize, &'static str) {
         (self.span.line, self.span.col, self.span.idx, self.code)
     }
+
+    /// Whether this error came from an inserted-token recovery (e.g., missing ')' or ';').
+    pub fn is_inserted(&self) -> bool {
+        self.code == "E1002"
+    }
+
 }
 
 
@@ -437,6 +443,12 @@ impl Parser {
     pub fn error_count(&self) -> usize {
         self.errors.len()
     }
+
+    /// Count how many errors are inserted-token recoveries.
+    pub fn inserted_error_count(&self) -> usize {
+        self.errors.iter().filter(|e| e.is_inserted()).count()
+    }
+
 
     /// Whether parsing aborted due to too many errors.
     pub fn has_aborted(&self) -> bool {
