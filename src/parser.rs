@@ -449,6 +449,12 @@ impl Parser {
         self.errors.iter().filter(|e| e.is_inserted()).count()
     }
 
+    /// Count non-inserted errors (i.e., "real" parse errors).
+    pub fn real_error_count(&self) -> usize {
+        self.errors.len().saturating_sub(self.inserted_error_count())
+    }
+
+
 
     /// Whether parsing aborted due to too many errors.
     pub fn has_aborted(&self) -> bool {
