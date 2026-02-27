@@ -454,6 +454,15 @@ impl Parser {
         self.errors.len().saturating_sub(self.inserted_error_count())
     }
 
+    /// Ratio of real errors to total errors (0.0..=1.0). Higher is "worse" input; lower means more recovered via insertions.
+    pub fn error_quality_ratio(&self) -> f64 {
+        if self.errors.is_empty() {
+            return 0.0;
+        }
+        self.real_error_count() as f64 / self.errors.len() as f64
+    }
+
+
 
 
     /// Whether parsing aborted due to too many errors.
