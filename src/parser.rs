@@ -476,10 +476,29 @@ impl Parser {
     }
 
     /// A short human-readable summary for logs: error count, aborted flag, and the first error (if any).
-    pub fn summary(&self) -> String {
+        pub fn summary(&self) -> String {
         if self.errors.is_empty() {
             return "no parser errors".to_string();
         }
+
+        let total = self.errors.len();
+        let inserted = self.inserted_error_count();
+        let real = total.saturating_sub(inserted);
+        let ratio = self.error_quality_ratio();
+
+        let first = self
+            .first_error()
+            .map(|e| e.compact())
+            .unwrap_or_else(|| "<unknown>".to_string());
+
+        if self.aborted {
+            format!(
+                "{total} errors (real={real}, inserted={inserted}, ratio={ratio:.2}) (aborted): {first}"
+            )
+        } else {
+            format!("{total} errors (real={real}, inserted={inserted}, ratio={ratio:.2}): {first}")
+        }
+    }
         let first = self.first_error().map(|e| e.compact()).unwrap_or_else(|| "<unknown>".to_string());
         if self.aborted {
             format!("{} errors (aborted): {}", self.errors.len(), first)
