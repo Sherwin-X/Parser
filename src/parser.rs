@@ -516,6 +516,21 @@ impl Parser {
             *map.entry(e.code).or_insert(0) += 1;
         }
 
+    /// Count errors by code, split into (total, inserted).
+    pub fn error_stats_detailed(&self) -> std::collections::BTreeMap<&'static str, (usize, usize)> {
+        let mut map: std::collections::BTreeMap<&'static str, (usize, usize)> =
+            std::collections::BTreeMap::new();
+        for e in &self.errors {
+            let entry = map.entry(e.code).or_insert((0, 0));
+            entry.0 += 1;
+            if e.is_inserted() {
+                entry.1 += 1;
+            }
+        }
+        map
+    }
+
+
     fn sorted_error_indices(&self) -> Vec<usize> {
         let idxs = self.sorted_error_indices();
 
@@ -544,6 +559,30 @@ impl Parser {
             for (code, n) in self.error_stats() {
                 out.push_str(&format!("{code}: {n}\n"));
             }
+
+    /// Like `format_errors_sorted`, but the stats header also reports inserted-token counts per code.
+    pub fn format_errors_sorted_detailed_stats(&self) -> String {
+        if self.errors.is_empty() {
+            return String::new();
+        }
+
+        let mut out = String::new();
+        out.push_str("== Parser error stats (total/inserted) ==\n");
+        for (code, (total, inserted)) in self.error_stats_detailed() {
+            out.push_str(&format!("{code}: {total}/{inserted}\n"));
+        }
+        out.push('\n');
+
+        let idxs = self.sorted_error_indices();
+        for &i in idxs.iter() {
+            out.push_str(&self.errors[i].render());
+            if !out.ends_with('\n') {
+                out.push('\n');
+            }
+        }
+        out
+    }
+
 
     /// Get errors sorted by source position (line/col/idx/code).
     pub fn errors_sorted(&self) -> Vec<&ParseError> {
