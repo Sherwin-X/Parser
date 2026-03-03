@@ -537,6 +537,16 @@ impl Parser {
         idxs
     }
 
+    fn append_errors_sorted_full(&self, out: &mut String) {
+        self.append_errors_sorted_full(&mut out);
+
+            }
+
+    fn append_errors_sorted_compact(&self, out: &mut String) {
+        self.append_errors_sorted_compact(&mut out);
+    }
+
+
 
     /// Render all accumulated errors into a single string (useful for tests/logging).
     /// If `include_stats` is true, a short per-code summary is prepended.
@@ -573,14 +583,9 @@ impl Parser {
         }
         out.push('\n');
 
-        let idxs = self.sorted_error_indices();
-        for &i in idxs.iter() {
-            out.push_str(&self.errors[i].render());
-            if !out.ends_with('\n') {
-                out.push('\n');
-            }
-        }
-        out
+        self.append_errors_sorted_full(&mut out);
+
+                out
     }
 
 
@@ -619,15 +624,9 @@ impl Parser {
             out.push('\n');
         }
 
-        let idxs = self.sorted_error_indices();
+        self.append_errors_sorted_full(&mut out);
 
-        for &i in idxs.iter() {
-            out.push_str(&self.errors[i].render());
-            if !out.ends_with('\n') {
-                out.push('\n');
-            }
-        }
-        out
+                out
     }
 
 
