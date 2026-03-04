@@ -546,6 +546,33 @@ impl Parser {
         self.append_errors_sorted_compact(&mut out);
     }
 
+    fn append_errors_sorted_full_filtered(&self, out: &mut String, include_inserted: bool) {
+        let idxs = self.sorted_error_indices();
+        for &i in idxs.iter() {
+            let e = &self.errors[i];
+            if !include_inserted && e.is_inserted() {
+                continue;
+            }
+            out.push_str(&e.render());
+            if !out.ends_with('\n') {
+                out.push('\n');
+            }
+        }
+    }
+
+    fn append_errors_sorted_compact_filtered(&self, out: &mut String, include_inserted: bool) {
+        let idxs = self.sorted_error_indices();
+        for &i in idxs.iter() {
+            let e = &self.errors[i];
+            if !include_inserted && e.is_inserted() {
+                continue;
+            }
+            out.push_str(&e.compact());
+            out.push('\n');
+        }
+    }
+
+
 
 
     /// Render all accumulated errors into a single string (useful for tests/logging).
@@ -569,6 +596,34 @@ impl Parser {
             for (code, n) in self.error_stats() {
                 out.push_str(&format!("{code}: {n}\n"));
             }
+
+    /// Render only non-inserted ("real") errors in stable source order.
+    pub fn format_real_errors_sorted(&self, include_stats: bool) -> String {
+        let mut out = String::new();
+
+        if include_stats && !self.errors.is_empty() {
+            out.push_str("== Parser error stats (real only) ==\n");
+            for (code, (total, inserted)) in self.error_stats_detailed() {
+                let real = total.saturating_sub(inserted);
+                if real == 0 {
+                    continue;
+                }
+                out.push_str(&format!("{code}: {real}\n"));
+            }
+            out.push('\n');
+        }
+
+        self.append_errors_sorted_full_filtered(&mut out, false);
+        out
+    }
+
+    /// Render only non-inserted ("real") errors in a compact, one-line-per-error format.
+    pub fn format_real_errors_compact_sorted(&self) -> String {
+        let mut out = String::new();
+        self.append_errors_sorted_compact_filtered(&mut out, false);
+        out
+    }
+
 
     /// Like `format_errors_sorted`, but the stats header also reports inserted-token counts per code.
     pub fn format_errors_sorted_detailed_stats(&self) -> String {
