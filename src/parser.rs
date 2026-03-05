@@ -1,6 +1,8 @@
 use crate::token::{Token, TokenType, Span};
 use std::sync::OnceLock;
 
+const INSERTED_TOKEN_ERROR_CODE: &str = INSERTED_TOKEN_ERROR_CODE;
+
 
 fn default_max_errors() -> usize {
     static MAX: OnceLock<usize> = OnceLock::new();
@@ -321,7 +323,7 @@ impl ParseError {
 
     /// Whether this error came from an inserted-token recovery (e.g., missing ')' or ';').
     pub fn is_inserted(&self) -> bool {
-        self.code == "E1002"
+        self.code == INSERTED_TOKEN_ERROR_CODE
     }
 
 }
@@ -944,7 +946,7 @@ impl Parser {
         };
         // Note: we intentionally do NOT sync() here, treating the token as "inserted" for recovery.
         self.err_push_help(
-            "E1002",
+            INSERTED_TOKEN_ERROR_CODE,
             format!("expected {} (inserted), found {}", expected, got),
             span,
             Some(format!("assuming missing {} here", expected)),
