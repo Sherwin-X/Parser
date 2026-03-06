@@ -477,6 +477,18 @@ impl Parser {
         self.errors.is_empty() && !self.aborted
     }
 
+    /// True if the parse should be treated as a failure by callers.
+    /// Inserted-token recoveries alone do not count as a hard failure.
+    pub fn should_fail(&self) -> bool {
+        self.has_aborted() || self.real_error_count() > 0
+    }
+
+    /// True if parsing only needed inserted-token recovery and produced no "real" errors.
+    pub fn recovered_only(&self) -> bool {
+        !self.has_aborted() && self.real_error_count() == 0 && self.inserted_error_count() > 0
+    }
+
+
     /// A short human-readable summary for logs: error count, aborted flag, and the first error (if any).
         pub fn summary(&self) -> String {
         if self.errors.is_empty() {
