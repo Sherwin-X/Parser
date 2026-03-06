@@ -178,6 +178,14 @@ pub struct ParseError {
     pub help: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ParseOutcome {
+    Clean,
+    RecoveredOnly,
+    Failed,
+}
+
+
 impl ParseError {
     pub fn render(&self) -> String {
         const TAB_WIDTH: usize = 4;
@@ -487,6 +495,18 @@ impl Parser {
     pub fn recovered_only(&self) -> bool {
         !self.has_aborted() && self.real_error_count() == 0 && self.inserted_error_count() > 0
     }
+
+    /// High-level parser outcome for callers/tests.
+    pub fn outcome(&self) -> ParseOutcome {
+        if self.should_fail() {
+            ParseOutcome::Failed
+        } else if self.recovered_only() {
+            ParseOutcome::RecoveredOnly
+        } else {
+            ParseOutcome::Clean
+        }
+    }
+
 
 
     /// A short human-readable summary for logs: error count, aborted flag, and the first error (if any).
