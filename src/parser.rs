@@ -444,6 +444,15 @@ impl Parser {
         } else {
             Err(errors)
         }
+
+    /// Parse and return items together with the final high-level outcome and collected errors.
+    pub fn parse_with_outcome(mut self) -> (Vec<Item>, ParseOutcome, Vec<ParseError>) {
+        let items = self.parse_items();
+        let outcome = self.outcome();
+        let errors = self.errors;
+        (items, outcome, errors)
+    }
+
     }
 
 
