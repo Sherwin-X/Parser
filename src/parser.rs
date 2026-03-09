@@ -185,6 +185,32 @@ pub enum ParseOutcome {
     Failed,
 }
 
+#[derive(Debug)]
+pub struct ParseReport {
+    pub items: Vec<Item>,
+    pub outcome: ParseOutcome,
+    pub errors: Vec<ParseError>,
+}
+
+impl ParseReport {
+    pub fn is_clean(&self) -> bool {
+        self.outcome == ParseOutcome::Clean
+    }
+
+    pub fn recovered_only(&self) -> bool {
+        self.outcome == ParseOutcome::RecoveredOnly
+    }
+
+    pub fn failed(&self) -> bool {
+        self.outcome == ParseOutcome::Failed
+    }
+
+    pub fn error_count(&self) -> usize {
+        self.errors.len()
+    }
+}
+
+
 
 impl ParseError {
     pub fn render(&self) -> String {
@@ -452,6 +478,15 @@ impl Parser {
         let errors = self.errors;
         (items, outcome, errors)
     }
+
+    /// Parse and return a structured report object.
+    pub fn parse_report(mut self) -> ParseReport {
+        let items = self.parse_items();
+        let outcome = self.outcome();
+        let errors = self.errors;
+        ParseReport { items, outcome, errors }
+    }
+
 
     }
 
