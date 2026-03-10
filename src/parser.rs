@@ -208,6 +208,49 @@ impl ParseReport {
     pub fn error_count(&self) -> usize {
         self.errors.len()
     }
+
+    pub fn inserted_error_count(&self) -> usize {
+        self.errors.iter().filter(|e| e.is_inserted()).count()
+    }
+
+    pub fn real_error_count(&self) -> usize {
+        self.errors.len().saturating_sub(self.inserted_error_count())
+    }
+
+    pub fn error_quality_ratio(&self) -> f64 {
+        if self.errors.is_empty() {
+            return 0.0;
+        }
+        self.real_error_count() as f64 / self.errors.len() as f64
+    }
+
+    pub fn summary(&self) -> String {
+        if self.errors.is_empty() {
+            return "no parser errors".to_string();
+        }
+
+        let total = self.errors.len();
+        let inserted = self.inserted_error_count();
+        let real = total.saturating_sub(inserted);
+        let ratio = self.error_quality_ratio();
+
+        let first = self
+            .errors
+            .iter()
+            .min_by_key(|e| e.sort_key())
+            .map(|e| e.compact())
+            .unwrap_or_else(|| "<unknown>".to_string());
+
+        match self.outcome {
+            ParseOutcome::Failed => {
+                format!("{total} errors (real={real}, inserted={inserted}, ratio={ratio:.2}) (failed): {first}")
+            }
+            ParseOutcome::RecoveredOnly => {
+                format!("{total} errors (real={real}, inserted={inserted}, ratio={ratio:.2}) (recovered): {first}")
+            }
+            ParseOutcome::Clean => "no parser errors".to_string(),
+        }
+    }
 }
 
 
