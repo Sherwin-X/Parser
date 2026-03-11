@@ -185,6 +185,17 @@ pub enum ParseOutcome {
     Failed,
 }
 
+impl fmt::Display for ParseOutcome {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ParseOutcome::Clean => write!(f, "clean"),
+            ParseOutcome::RecoveredOnly => write!(f, "recovered"),
+            ParseOutcome::Failed => write!(f, "failed"),
+        }
+    }
+}
+
+
 #[derive(Debug)]
 pub struct ParseReport {
     pub items: Vec<Item>,
@@ -252,6 +263,13 @@ impl ParseReport {
         }
     }
 }
+
+impl fmt::Display for ParseReport {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}: {}", self.outcome, self.summary())
+    }
+}
+
 
 
 
