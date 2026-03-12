@@ -308,6 +308,71 @@ impl ParseReport {
         out
     }
 
+
+    pub fn error_stats(&self) -> std::collections::BTreeMap<&'static str, usize> {
+        let mut map: std::collections::BTreeMap<&'static str, usize> =
+            std::collections::BTreeMap::new();
+        for e in &self.errors {
+            *map.entry(e.code).or_insert(0) += 1;
+        }
+        map
+    }
+
+    pub fn error_stats_detailed(&self) -> std::collections::BTreeMap<&'static str, (usize, usize)> {
+        let mut map: std::collections::BTreeMap<&'static str, (usize, usize)> =
+            std::collections::BTreeMap::new();
+        for e in &self.errors {
+            let entry = map.entry(e.code).or_insert((0, 0));
+            entry.0 += 1;
+            if e.is_inserted() {
+                entry.1 += 1;
+            }
+        }
+        map
+    }
+
+    pub fn format_real_errors_sorted(&self, include_stats: bool) -> String {
+        let mut out = String::new();
+
+        if include_stats && !self.errors.is_empty() {
+            out.push_str("== Parser error stats (real only) ==\n");
+            for (code, (total, inserted)) in self.error_stats_detailed() {
+                let real = total.saturating_sub(inserted);
+                if real == 0 {
+                    continue;
+                }
+                out.push_str(&format!("{code}: {real}\n"));
+            }
+            out.push('\n');
+        }
+
+        let mut v: Vec<&ParseError> = self.errors.iter().filter(|e| !e.is_inserted()).collect();
+        v.sort_by_key(|e| e.sort_key());
+        for e in v {
+            out.push_str(&e.render());
+            if !out.ends_with('\n') {
+                out.push('\n');
+            }
+        }
+        out
+    }
+
+    pub fn format_errors_sorted_detailed_stats(&self) -> String {
+        if self.errors.is_empty() {
+            return String::new();
+        }
+
+        let mut out = String::new();
+        out.push_str("== Parser error stats (total/inserted) ==\n");
+        for (code, (total, inserted)) in self.error_stats_detailed() {
+            out.push_str(&format!("{code}: {total}/{inserted}\n"));
+        }
+        out.push('\n');
+
+        out.push_str(&self.format_errors_sorted());
+        out
+    }
+
 }
 
 impl fmt::Display for ParseReport {
