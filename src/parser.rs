@@ -262,6 +262,52 @@ impl ParseReport {
             ParseOutcome::Clean => "no parser errors".to_string(),
         }
     }
+
+    pub fn errors_sorted(&self) -> Vec<&ParseError> {
+        let mut v: Vec<&ParseError> = self.errors.iter().collect();
+        v.sort_by_key(|e| e.sort_key());
+        v
+    }
+
+    pub fn first_error(&self) -> Option<&ParseError> {
+        self.errors.iter().min_by_key(|e| e.sort_key())
+    }
+
+    pub fn last_error(&self) -> Option<&ParseError> {
+        self.errors.iter().max_by_key(|e| e.sort_key())
+    }
+
+    pub fn format_errors_sorted(&self) -> String {
+        let mut out = String::new();
+        for e in self.errors_sorted() {
+            out.push_str(&e.render());
+            if !out.ends_with('\n') {
+                out.push('\n');
+            }
+        }
+        out
+    }
+
+    pub fn format_errors_compact_sorted(&self) -> String {
+        let mut out = String::new();
+        for e in self.errors_sorted() {
+            out.push_str(&e.compact());
+            out.push('\n');
+        }
+        out
+    }
+
+    pub fn format_real_errors_compact_sorted(&self) -> String {
+        let mut out = String::new();
+        let mut v: Vec<&ParseError> = self.errors.iter().filter(|e| !e.is_inserted()).collect();
+        v.sort_by_key(|e| e.sort_key());
+        for e in v {
+            out.push_str(&e.compact());
+            out.push('\n');
+        }
+        out
+    }
+
 }
 
 impl fmt::Display for ParseReport {
