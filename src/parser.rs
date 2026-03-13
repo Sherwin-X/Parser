@@ -373,6 +373,23 @@ impl ParseReport {
         out
     }
 
+
+    pub fn as_result(&self) -> Result<&[Item], &[ParseError]> {
+        if self.failed() {
+            Err(&self.errors)
+        } else {
+            Ok(&self.items)
+        }
+    }
+
+    pub fn into_result(self) -> Result<Vec<Item>, Vec<ParseError>> {
+        if self.failed() {
+            Err(self.errors)
+        } else {
+            Ok(self.items)
+        }
+    }
+
 }
 
 impl fmt::Display for ParseReport {
