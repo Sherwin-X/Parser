@@ -390,6 +390,23 @@ impl ParseReport {
         }
     }
 
+
+    pub fn as_strict_result(&self) -> Result<&[Item], &[ParseError]> {
+        if self.is_clean() {
+            Ok(&self.items)
+        } else {
+            Err(&self.errors)
+        }
+    }
+
+    pub fn into_strict_result(self) -> Result<Vec<Item>, Vec<ParseError>> {
+        if self.is_clean() {
+            Ok(self.items)
+        } else {
+            Err(self.errors)
+        }
+    }
+
 }
 
 impl fmt::Display for ParseReport {
