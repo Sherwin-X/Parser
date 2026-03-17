@@ -407,6 +407,15 @@ impl ParseReport {
         }
     }
 
+
+    pub fn into_parts(self) -> (Vec<Item>, ParseOutcome, Vec<ParseError>) {
+        (self.items, self.outcome, self.errors)
+    }
+
+    pub fn parts(&self) -> (&[Item], ParseOutcome, &[ParseError]) {
+        (&self.items, self.outcome, &self.errors)
+    }
+
 }
 
 impl fmt::Display for ParseReport {
