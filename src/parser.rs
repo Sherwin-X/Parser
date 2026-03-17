@@ -416,6 +416,15 @@ impl ParseReport {
         (&self.items, self.outcome, &self.errors)
     }
 
+
+    pub fn has_errors(&self) -> bool {
+        !self.errors.is_empty()
+    }
+
+    pub fn should_fail(&self) -> bool {
+        self.outcome == ParseOutcome::Failed
+    }
+
 }
 
 impl fmt::Display for ParseReport {
