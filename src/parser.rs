@@ -425,6 +425,19 @@ impl ParseReport {
         self.outcome == ParseOutcome::Failed
     }
 
+
+    pub fn real_errors(&self) -> Vec<&ParseError> {
+        let mut v: Vec<&ParseError> = self.errors.iter().filter(|e| !e.is_inserted()).collect();
+        v.sort_by_key(|e| e.sort_key());
+        v
+    }
+
+    pub fn inserted_errors(&self) -> Vec<&ParseError> {
+        let mut v: Vec<&ParseError> = self.errors.iter().filter(|e| e.is_inserted()).collect();
+        v.sort_by_key(|e| e.sort_key());
+        v
+    }
+
 }
 
 impl fmt::Display for ParseReport {
