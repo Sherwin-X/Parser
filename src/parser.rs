@@ -438,6 +438,44 @@ impl ParseReport {
         v
     }
 
+
+    pub fn first_real_error(&self) -> Option<&ParseError> {
+        self.errors
+            .iter()
+            .filter(|e| !e.is_inserted())
+            .min_by_key(|e| e.sort_key())
+    }
+
+    pub fn first_inserted_error(&self) -> Option<&ParseError> {
+        self.errors
+            .iter()
+            .filter(|e| e.is_inserted())
+            .min_by_key(|e| e.sort_key())
+    }
+
+    pub fn last_real_error(&self) -> Option<&ParseError> {
+        self.errors
+            .iter()
+            .filter(|e| !e.is_inserted())
+            .max_by_key(|e| e.sort_key())
+    }
+
+    pub fn last_inserted_error(&self) -> Option<&ParseError> {
+        self.errors
+            .iter()
+            .filter(|e| e.is_inserted())
+            .max_by_key(|e| e.sort_key())
+    }
+
+
+    pub fn has_real_errors(&self) -> bool {
+        self.errors.iter().any(|e| !e.is_inserted())
+    }
+
+    pub fn has_inserted_errors(&self) -> bool {
+        self.errors.iter().any(|e| e.is_inserted())
+    }
+
 }
 
 impl fmt::Display for ParseReport {
