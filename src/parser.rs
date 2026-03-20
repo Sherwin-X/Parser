@@ -501,6 +501,31 @@ impl ParseReport {
         out
     }
 
+
+    pub fn real_error_stats(&self) -> std::collections::BTreeMap<&'static str, usize> {
+        let mut map: std::collections::BTreeMap<&'static str, usize> =
+            std::collections::BTreeMap::new();
+        for e in &self.errors {
+            if e.is_inserted() {
+                continue;
+            }
+            *map.entry(e.code).or_insert(0) += 1;
+        }
+        map
+    }
+
+    pub fn inserted_error_stats(&self) -> std::collections::BTreeMap<&'static str, usize> {
+        let mut map: std::collections::BTreeMap<&'static str, usize> =
+            std::collections::BTreeMap::new();
+        for e in &self.errors {
+            if !e.is_inserted() {
+                continue;
+            }
+            *map.entry(e.code).or_insert(0) += 1;
+        }
+        map
+    }
+
 }
 
 impl fmt::Display for ParseReport {
