@@ -476,6 +476,31 @@ impl ParseReport {
         self.errors.iter().any(|e| e.is_inserted())
     }
 
+
+    pub fn format_inserted_errors_sorted(&self) -> String {
+        let mut out = String::new();
+        let mut v: Vec<&ParseError> = self.errors.iter().filter(|e| e.is_inserted()).collect();
+        v.sort_by_key(|e| e.sort_key());
+        for e in v {
+            out.push_str(&e.render());
+            if !out.ends_with('\n') {
+                out.push('\n');
+            }
+        }
+        out
+    }
+
+    pub fn format_inserted_errors_compact_sorted(&self) -> String {
+        let mut out = String::new();
+        let mut v: Vec<&ParseError> = self.errors.iter().filter(|e| e.is_inserted()).collect();
+        v.sort_by_key(|e| e.sort_key());
+        for e in v {
+            out.push_str(&e.compact());
+            out.push('\n');
+        }
+        out
+    }
+
 }
 
 impl fmt::Display for ParseReport {
