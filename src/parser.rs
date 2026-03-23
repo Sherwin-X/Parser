@@ -1,7 +1,7 @@
 use crate::token::{Token, TokenType, Span};
 use std::sync::OnceLock;
 
-const INSERTED_TOKEN_ERROR_CODE: &str = INSERTED_TOKEN_ERROR_CODE;
+const INSERTED_TOKEN_ERROR_CODE: &str = "E1002";
 
 
 fn default_max_errors() -> usize {
@@ -1247,7 +1247,7 @@ impl Parser {
                         .into(),
                 ),
             });
-            *self.sorted_errors_cache.borrow_mut() = None;
+        *self.sorted_errors_cache.borrow_mut() = None;
 
             // Force parsing loops to stop cleanly.
             self.i = self.tokens.len();
@@ -1269,7 +1269,6 @@ impl Parser {
                 .filter(|(_, s)| !s.is_empty()),
             help,
         });
-        *self.sorted_errors_cache.borrow_mut() = None;
     }
 
     fn err_push(&mut self, code: &'static str, message: String, span: Span) {
@@ -1374,7 +1373,6 @@ impl Parser {
             false
         }
     }
-
 
     // 同步：在语句/表达式内部进行 panic-mode 恢复
     // 跳过 token，直到遇到一个“边界 token”（分隔符、闭合符、关键关键字等）
