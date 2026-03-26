@@ -762,7 +762,6 @@ impl Parser {
         !self.errors.is_empty()
     }
 
-
     /// Take ownership of accumulated errors (leaves the parser with an empty error list).
     pub fn take_errors(&mut self) -> Vec<ParseError> {
         *self.sorted_errors_cache.borrow_mut() = None;
@@ -1280,7 +1279,6 @@ impl Parser {
     fn err_push_help(&mut self, code: &'static str, message: String, span: Span, help: Option<String>) {
         self.push_error(code, message, span, help);
     }
-
 
 
 
