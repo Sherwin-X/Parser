@@ -1,7 +1,7 @@
 use crate::token::{Token, TokenType, Span};
 use std::sync::OnceLock;
 
-const INSERTED_TOKEN_ERROR_CODE: &str = "E1002";
+const INSERTED_TOKEN_ERROR_CODE: &str = INSERTED_TOKEN_ERROR_CODE;
 
 
 fn default_max_errors() -> usize {
@@ -269,6 +269,31 @@ impl ParseReport {
         v
     }
 
+    fn sorted_errors_by_kind(&self, inserted: bool) -> Vec<&ParseError> {
+        let mut v: Vec<&ParseError> = self
+            .errors
+            .iter()
+            .filter(|e| e.is_inserted() == inserted)
+            .collect();
+        v.sort_by_key(|e| e.sort_key());
+        v
+    }
+
+    fn append_sorted_errors(out: &mut String, errors: &[&ParseError], compact: bool) {
+        for e in errors {
+            if compact {
+                out.push_str(&e.compact());
+                out.push('\n');
+            } else {
+                out.push_str(&e.render());
+                if !out.ends_with('\n') {
+                    out.push('\n');
+                }
+            }
+        }
+    }
+
+
     pub fn first_error(&self) -> Option<&ParseError> {
         self.errors.iter().min_by_key(|e| e.sort_key())
     }
@@ -299,12 +324,8 @@ impl ParseReport {
 
     pub fn format_real_errors_compact_sorted(&self) -> String {
         let mut out = String::new();
-        let mut v: Vec<&ParseError> = self.errors.iter().filter(|e| !e.is_inserted()).collect();
-        v.sort_by_key(|e| e.sort_key());
-        for e in v {
-            out.push_str(&e.compact());
-            out.push('\n');
-        }
+        let v = self.sorted_errors_by_kind(false);
+        Self::append_sorted_errors(&mut out, &v, true);
         out
     }
 
@@ -335,25 +356,22 @@ impl ParseReport {
         let mut out = String::new();
 
         if include_stats && !self.errors.is_empty() {
-            out.push_str("== Parser error stats (real only) ==\n");
+            out.push_str("== Parser error stats (real only)
+");
             for (code, (total, inserted)) in self.error_stats_detailed() {
                 let real = total.saturating_sub(inserted);
                 if real == 0 {
                     continue;
                 }
-                out.push_str(&format!("{code}: {real}\n"));
+                out.push_str(&format!("{code}: {real}
+"));
             }
-            out.push('\n');
+            out.push('
+');
         }
 
-        let mut v: Vec<&ParseError> = self.errors.iter().filter(|e| !e.is_inserted()).collect();
-        v.sort_by_key(|e| e.sort_key());
-        for e in v {
-            out.push_str(&e.render());
-            if !out.ends_with('\n') {
-                out.push('\n');
-            }
-        }
+        let v = self.sorted_errors_by_kind(false);
+        Self::append_sorted_errors(&mut out, &v, false);
         out
     }
 
@@ -427,15 +445,11 @@ impl ParseReport {
 
 
     pub fn real_errors(&self) -> Vec<&ParseError> {
-        let mut v: Vec<&ParseError> = self.errors.iter().filter(|e| !e.is_inserted()).collect();
-        v.sort_by_key(|e| e.sort_key());
-        v
+        self.sorted_errors_by_kind(false)
     }
 
     pub fn inserted_errors(&self) -> Vec<&ParseError> {
-        let mut v: Vec<&ParseError> = self.errors.iter().filter(|e| e.is_inserted()).collect();
-        v.sort_by_key(|e| e.sort_key());
-        v
+        self.sorted_errors_by_kind(true)
     }
 
 
@@ -479,25 +493,15 @@ impl ParseReport {
 
     pub fn format_inserted_errors_sorted(&self) -> String {
         let mut out = String::new();
-        let mut v: Vec<&ParseError> = self.errors.iter().filter(|e| e.is_inserted()).collect();
-        v.sort_by_key(|e| e.sort_key());
-        for e in v {
-            out.push_str(&e.render());
-            if !out.ends_with('\n') {
-                out.push('\n');
-            }
-        }
+        let v = self.sorted_errors_by_kind(true);
+        Self::append_sorted_errors(&mut out, &v, false);
         out
     }
 
     pub fn format_inserted_errors_compact_sorted(&self) -> String {
         let mut out = String::new();
-        let mut v: Vec<&ParseError> = self.errors.iter().filter(|e| e.is_inserted()).collect();
-        v.sort_by_key(|e| e.sort_key());
-        for e in v {
-            out.push_str(&e.compact());
-            out.push('\n');
-        }
+        let v = self.sorted_errors_by_kind(true);
+        Self::append_sorted_errors(&mut out, &v, true);
         out
     }
 
@@ -553,7 +557,6 @@ impl ParseError {
                         let spaces = next.saturating_sub(col).max(1);
                         out.extend(std::iter::repeat(' ').take(spaces));
                         col = next;
-                    }
                     _ => {
                         out.push(ch);
                         col += 1;
@@ -777,6 +780,7 @@ impl Parser {
         *self.sorted_errors_cache.borrow_mut() = None;
     }
 
+
     /// Convenience helper: parse all items and return (items, errors, aborted).
     /// Useful for callers that prefer a single return value rather than inspecting parser state.
     pub fn parse_result(mut self) -> (Vec<Item>, Vec<ParseError>, bool) {
@@ -795,7 +799,6 @@ impl Parser {
         } else {
             Err(errors)
         }
-    }
 
     /// Parse and return items together with the final high-level outcome and collected errors.
     pub fn parse_with_outcome(mut self) -> (Vec<Item>, ParseOutcome, Vec<ParseError>) {
@@ -812,6 +815,12 @@ impl Parser {
         let errors = self.errors;
         ParseReport { items, outcome, errors }
     }
+
+
+    }
+
+
+
 
     /// Number of errors collected so far.
     pub fn error_count(&self) -> usize {
@@ -835,6 +844,9 @@ impl Parser {
         }
         self.real_error_count() as f64 / self.errors.len() as f64
     }
+
+
+
 
     /// Whether parsing aborted due to too many errors.
     pub fn has_aborted(&self) -> bool {
@@ -868,8 +880,10 @@ impl Parser {
         }
     }
 
+
+
     /// A short human-readable summary for logs: error count, aborted flag, and the first error (if any).
-    pub fn summary(&self) -> String {
+        pub fn summary(&self) -> String {
         if self.errors.is_empty() {
             return "no parser errors".to_string();
         }
@@ -878,6 +892,7 @@ impl Parser {
         let inserted = self.inserted_error_count();
         let real = total.saturating_sub(inserted);
         let ratio = self.error_quality_ratio();
+
         let first = self
             .first_error()
             .map(|e| e.compact())
@@ -888,21 +903,25 @@ impl Parser {
                 "{total} errors (real={real}, inserted={inserted}, ratio={ratio:.2}) (aborted): {first}"
             )
         } else {
-            format!(
-                "{total} errors (real={real}, inserted={inserted}, ratio={ratio:.2}): {first}"
-            )
+            format!("{total} errors (real={real}, inserted={inserted}, ratio={ratio:.2}): {first}")
+        }
+    }
+        let first = self.first_error().map(|e| e.compact()).unwrap_or_else(|| "<unknown>".to_string());
+        if self.aborted {
+            format!("{} errors (aborted): {}", self.errors.len(), first)
+        } else {
+            format!("{} errors: {}", self.errors.len(), first)
         }
     }
 
+
+
     /// Count errors by error code (stable ordering).
     pub fn error_stats(&self) -> std::collections::BTreeMap<&'static str, usize> {
-        let mut map: std::collections::BTreeMap<&'static str, usize> =
-            std::collections::BTreeMap::new();
+        let mut map: std::collections::BTreeMap<&'static str, usize> = std::collections::BTreeMap::new();
         for e in &self.errors {
             *map.entry(e.code).or_insert(0) += 1;
         }
-        map
-    }
 
     /// Count errors by code, split into (total, inserted).
     pub fn error_stats_detailed(&self) -> std::collections::BTreeMap<&'static str, (usize, usize)> {
@@ -918,33 +937,20 @@ impl Parser {
         map
     }
 
-    fn sorted_error_indices(&self) -> Rc<Vec<usize>> {
-        if let Some(cached) = self.sorted_errors_cache.borrow().as_ref() {
-            return Rc::clone(cached);
-        }
-        let mut idxs: Vec<usize> = (0..self.errors.len()).collect();
-        idxs.sort_by_key(|&i| self.errors[i].sort_key());
-        let rc = Rc::new(idxs);
-        *self.sorted_errors_cache.borrow_mut() = Some(Rc::clone(&rc));
-        rc
+
+    fn sorted_error_indices(&self) -> Vec<usize> {
+        let idxs = self.sorted_error_indices();
+
+        idxs
     }
 
     fn append_errors_sorted_full(&self, out: &mut String) {
-        let idxs = self.sorted_error_indices();
-        for &i in idxs.iter() {
-            out.push_str(&self.errors[i].render());
-            if !out.ends_with('\n') {
-                out.push('\n');
+        self.append_errors_sorted_full(&mut out);
+
             }
-        }
-    }
 
     fn append_errors_sorted_compact(&self, out: &mut String) {
-        let idxs = self.sorted_error_indices();
-        for &i in idxs.iter() {
-            out.push_str(&self.errors[i].compact());
-            out.push('\n');
-        }
+        self.append_errors_sorted_compact(&mut out);
     }
 
     fn append_errors_sorted_full_filtered(&self, out: &mut String, include_inserted: bool) {
@@ -973,6 +979,9 @@ impl Parser {
         }
     }
 
+
+
+
     /// Render all accumulated errors into a single string (useful for tests/logging).
     /// If `include_stats` is true, a short per-code summary is prepended.
     pub fn format_errors(&self, include_stats: bool) -> String {
@@ -983,19 +992,9 @@ impl Parser {
             for (code, n) in self.error_stats() {
                 out.push_str(&format!("{code}: {n}\n"));
             }
-            out.push('\n');
-        }
-
-        for e in &self.errors {
-            out.push_str(&e.render());
-            if !out.ends_with('\n') {
-                out.push('\n');
-            }
-        }
-        out
-    }
 
     /// Render full multi-line errors, sorted by source position (line/col/idx/code).
+    /// This keeps output stable for test diffs even if recovery changes emission order.
     pub fn format_errors_sorted(&self, include_stats: bool) -> String {
         let mut out = String::new();
 
@@ -1004,12 +1003,6 @@ impl Parser {
             for (code, n) in self.error_stats() {
                 out.push_str(&format!("{code}: {n}\n"));
             }
-            out.push('\n');
-        }
-
-        self.append_errors_sorted_full(&mut out);
-        out
-    }
 
     /// Render only non-inserted ("real") errors in stable source order.
     pub fn format_real_errors_sorted(&self, include_stats: bool) -> String {
@@ -1038,6 +1031,7 @@ impl Parser {
         out
     }
 
+
     /// Like `format_errors_sorted`, but the stats header also reports inserted-token counts per code.
     pub fn format_errors_sorted_detailed_stats(&self) -> String {
         if self.errors.is_empty() {
@@ -1052,8 +1046,10 @@ impl Parser {
         out.push('\n');
 
         self.append_errors_sorted_full(&mut out);
-        out
+
+                out
     }
+
 
     /// Get errors sorted by source position (line/col/idx/code).
     pub fn errors_sorted(&self) -> Vec<&ParseError> {
@@ -1062,8 +1058,6 @@ impl Parser {
         for &i in idxs.iter() {
             v.push(&self.errors[i]);
         }
-        v
-    }
 
     /// Call `f` for each error in stable source order without allocating a Vec of references.
     pub fn for_each_error_sorted<F: FnMut(&ParseError)>(&self, mut f: F) {
@@ -1073,40 +1067,83 @@ impl Parser {
         }
     }
 
+        v
+    }
+
     /// First error in source order, if any.
     pub fn first_error(&self) -> Option<&ParseError> {
+        // O(n) without allocation/sort
         self.errors.iter().min_by_key(|e| e.sort_key())
     }
 
     /// Last error in source order, if any.
     pub fn last_error(&self) -> Option<&ParseError> {
+        // O(n) without allocation/sort
         self.errors.iter().max_by_key(|e| e.sort_key())
     }
 
-    /// Render errors in a compact, one-line-per-error format.
+
+            out.push('\n');
+        }
+
+        self.append_errors_sorted_full(&mut out);
+
+                out
+    }
+
+
+    /// Render errors in a compact, one-line-per-error format (easy to diff in tests).
     pub fn format_errors_compact(&self) -> String {
         let mut out = String::new();
         for e in &self.errors {
             out.push_str(&e.compact());
             out.push('\n');
         }
+
+    /// Render errors in a compact format, but sorted by source position (line/col),
+    /// to keep output stable even if recovery changes error emission order.
+    pub fn format_errors_compact_sorted(&self) -> String {
+        let idxs = self.sorted_error_indices();
+
+        let mut out = String::new();
+        for &i in idxs.iter() {
+            out.push_str(&self.errors[i].compact());
+            out.push('\n');
+        }
         out
     }
 
-    /// Render errors in a compact format, but sorted by source position.
-    pub fn format_errors_compact_sorted(&self) -> String {
-        let mut out = String::new();
-        self.append_errors_sorted_compact(&mut out);
         out
     }
+
+            out.push('\n');
+        }
+
+        for e in &self.errors {
+            out.push_str(&e.render());
+            if !out.ends_with('\n') {
+                out.push('\n');
+            }
+        }
+        out
+    }
+
+        map
+    }
+
+
+
 
     pub fn new(tokens: Vec<Token>, source: String) -> Self {
+        let line_starts = build_line_starts(&source);
+        let max_errors_limit = default_max_errors();
+
         Self {
             tokens,
             i: 0,
             source,
-            line_starts: build_line_starts(&source),
-            max_errors_limit: default_max_errors(),
+            line_starts,
+            max_errors_limit,
             errors: vec![],
             seen_errors: HashSet::new(),
             sorted_errors_cache: RefCell::new(None),
@@ -1247,7 +1284,7 @@ impl Parser {
                         .into(),
                 ),
             });
-            *self.sorted_errors_cache.borrow_mut() = None;
+        *self.sorted_errors_cache.borrow_mut() = None;
 
             // Force parsing loops to stop cleanly.
             self.i = self.tokens.len();
@@ -1269,7 +1306,6 @@ impl Parser {
                 .filter(|(_, s)| !s.is_empty()),
             help,
         });
-        *self.sorted_errors_cache.borrow_mut() = None;
     }
 
     fn err_push(&mut self, code: &'static str, message: String, span: Span) {
@@ -1283,6 +1319,24 @@ impl Parser {
 
 
     fn err_expect(&mut self, expected: &str) {
+        let mut span = self.cur_span();
+        // Point the caret at the insertion position rather than highlighting the current token.
+        span.len = 0;
+        let got = if self.at_end() {
+            "EOF".to_string()
+        } else {
+            let t = &self.tokens[self.i];
+            // Keep messages stable (no raw newlines/tabs) and reasonably short.
+            let mut s = t.text().to_string();
+            s = s.replace('\n', "\\n")
+                 .replace('\r', "\\r")
+                 .replace('\t', "\\t");
+            if s.len() > 40 {
+                s.truncate(40);
+                s.push('…');
+            }
+
+    fn err_expect_inserted(&mut self, expected: &str) {
         let span = self.cur_span();
         let got = if self.at_end() {
             "EOF".to_string()
@@ -1290,35 +1344,15 @@ impl Parser {
             let t = &self.tokens[self.i];
             let mut s = t.text().to_string();
             s = s.replace('\n', "\\n")
-                .replace('\r', "\\r")
-                .replace('\t', "\\t");
+                 .replace('\r', "\\r")
+                 .replace('\t', "\\t");
             if s.len() > 40 {
                 s.truncate(40);
                 s.push('…');
             }
             format!("{:?} '{}'", t.kind(), s)
         };
-        self.err_push("E1001", format!("expected {}, found {}", expected, got), span);
-        self.sync();
-    }
-
-    fn err_expect_inserted(&mut self, expected: &str) {
-        let mut span = self.cur_span();
-        span.len = 0;
-        let got = if self.at_end() {
-            "EOF".to_string()
-        } else {
-            let t = &self.tokens[self.i];
-            let mut s = t.text().to_string();
-            s = s.replace('\n', "\\n")
-                .replace('\r', "\\r")
-                .replace('\t', "\\t");
-            if s.len() > 40 {
-                s.truncate(40);
-                s.push('…');
-            }
-            format!("{:?} '{}'", t.kind(), s)
-        };
+        // Note: we intentionally do NOT sync() here, treating the token as "inserted" for recovery.
         self.err_push_help(
             INSERTED_TOKEN_ERROR_CODE,
             format!("expected {} (inserted), found {}", expected, got),
@@ -1327,11 +1361,15 @@ impl Parser {
         );
     }
 
+            format!("{:?} '{}'", t.kind(), s)
+        };
+        self.err_push("E1001", format!("expected {} (inserted), found {}", expected, got), span);
+        self.sync();
+    }
     fn err_custom_span(&mut self, code: &'static str, msg: String, span: Span) {
         self.err_push(code, msg, span);
         self.sync();
     }
-
     fn err_custom_here(&mut self, code: &'static str, msg: &str) {
         let span = self.cur_span();
         self.err_push(code, msg.to_string(), span);
@@ -1340,13 +1378,9 @@ impl Parser {
 
     fn expect_punct(&mut self, ch: &str) {
         if !self.cur_is_punct(ch) {
+            // Error production: treat common separators/closers as inserted to reduce cascade errors.
             let insertable = matches!(ch, ")" | "]" | "}" | ";" | "," | ":");
-            if insertable
-                && (self.is_expr_end()
-                    || (ch == ";" && self.is_stmt_start())
-                    || ((ch == ")" || ch == "]") && self.is_stmt_start())
-                    || self.at_end())
-            {
+            if insertable && (self.is_expr_end() || self.cur_is_punct("}") || self.at_end()) {
                 self.err_expect_inserted(&format!("'{}'", ch));
                 return;
             }
@@ -1354,8 +1388,7 @@ impl Parser {
         } else {
             self.bump();
         }
-    }
-
+    }    }
     fn expect_kw(&mut self, kw: &str) {
         if !self.cur_is_kw(kw) {
             self.err_expect(&format!("keyword '{}'", kw));
@@ -1363,7 +1396,6 @@ impl Parser {
             self.bump();
         }
     }
-
     fn expect_token_text(&mut self, text: &str) -> bool {
         if self.cur_is_punct(text) || self.cur_is_op(text) || self.cur_is_kw(text) {
             self.bump();
@@ -1378,53 +1410,18 @@ impl Parser {
     // 跳过 token，直到遇到一个“边界 token”（分隔符、闭合符、关键关键字等）
     fn sync(&mut self) {
         while !self.at_end() {
+            // Consume separators so we don't get stuck reporting the same error.
             if self.cur_is_punct(";") || self.cur_is_punct(",") {
                 self.bump();
                 return;
             }
-
-            if self.cur_is_punct("}")
-                || self.cur_is_punct(")")
-                || self.cur_is_punct("]")
-                || self.cur_is_punct(":")
-            {
-                return;
-            }
-
-            if self.cur_is_kw("case") || self.cur_is_kw("default") || self.cur_is_kw("else") {
-                return;
-            }
-
-            if self.cur_is_kw("if")
-                || self.cur_is_kw("for")
-                || self.cur_is_kw("while")
-                || self.cur_is_kw("do")
-                || self.cur_is_kw("switch")
-                || self.cur_is_kw("return")
-                || self.cur_is_kw("break")
-                || self.cur_is_kw("continue")
-                || self.cur_is_kw("goto")
-                || self.cur_is_kw("typedef")
-                || self.cur_is_kw("struct")
-                || self.cur_is_kw("union")
-                || self.cur_is_kw("enum")
-            {
-                return;
-            }
-
-            if self.cur_is_punct("{") {
-                return;
-            }
-
-            self.i += 1;
-        }
-    }
 
     /// Whether the current token can start a statement.
     fn is_stmt_start(&self) -> bool {
         if self.at_end() {
             return false;
         }
+        // Keywords that can begin a statement
         if self.cur_is_kw("if")
             || self.cur_is_kw("for")
             || self.cur_is_kw("while")
@@ -1438,16 +1435,19 @@ impl Parser {
         {
             return true;
         }
+        // Block start
         if self.cur_is_punct("{") {
             return true;
         }
+        // A declaration can also start a statement (e.g., "int x;")
         if self.peek_type_start() {
             return true;
         }
+        // Fallback: identifier could start an expression-statement
         self.cur_is(&TokenType::Identifier)
     }
 
-    /// Whether the current token can end an expression (common recovery boundary).
+        /// Whether the current token can end an expression (common recovery boundary).
     fn is_expr_end(&self) -> bool {
         if self.at_end() {
             return true;
@@ -1462,23 +1462,84 @@ impl Parser {
             || self.cur_is_kw("default")
     }
 
-    /// Statement-level panic-mode recovery: skip tokens until a likely statement boundary.
+/// Statement-level panic-mode recovery: skip tokens until a likely statement boundary.
     /// This reduces cascade errors compared to token-level sync().
     fn sync_stmt(&mut self) {
+        // Ensure we always make progress
         if !self.at_end() {
             self.i += 1;
         }
 
         while !self.at_end() {
+            // Hard statement boundaries
             if self.cur_is_punct(";") || self.cur_is_punct("}") {
                 return;
             }
+
+            // Switch label boundaries
             if self.cur_is_punct(":") || self.cur_is_kw("case") || self.cur_is_kw("default") || self.cur_is_kw("else") {
+                return;
+            }
+
+            // Next likely statement start
+            if self.is_stmt_start() {
+                return;
+            }
+
+            self.i += 1;
+        }
+    }
+
+        while !self.at_end() {
+            if self.cur_is_punct(";") || self.cur_is_punct("}") {
                 return;
             }
             if self.is_stmt_start() {
                 return;
             }
+            self.i += 1;
+        }
+    }
+
+
+            // Do not consume closers / label separators: caller should decide how to unwind.
+            if self.cur_is_punct("}")
+                || self.cur_is_punct(")")
+                || self.cur_is_punct("]")
+                || self.cur_is_punct(":")
+            {
+                return;
+            }
+
+            // Switch labels / else: let the higher-level parser see them.
+            if self.cur_is_kw("case") || self.cur_is_kw("default") || self.cur_is_kw("else") {
+                return;
+            }
+
+            // Potential statement/decl starts: stop so outer loop can re-dispatch.
+            if self.cur_is_kw("if")
+                || self.cur_is_kw("for")
+                || self.cur_is_kw("while")
+                || self.cur_is_kw("do")
+                || self.cur_is_kw("switch")
+                || self.cur_is_kw("return")
+                || self.cur_is_kw("break")
+                || self.cur_is_kw("continue")
+                || self.cur_is_kw("goto")
+            || self.cur_is_kw("else")
+                || self.cur_is_kw("typedef")
+                || self.cur_is_kw("struct")
+                || self.cur_is_kw("union")
+                || self.cur_is_kw("enum")
+            {
+                return;
+            }
+
+            // Treat '{' as a reasonable boundary for statement recovery.
+            if self.cur_is_punct("{") {
+                return;
+            }
+
             self.i += 1;
         }
     }
@@ -1500,6 +1561,7 @@ impl Parser {
     /// 顶层同步：用于 parse_items() 的 panic-mode 恢复。
     /// 目标：跳到下一个可能的“顶层起始点”，避免卡死在坏 token 上。
     fn sync_top_level(&mut self) {
+        // Always ensure we make progress.
         if !self.at_end() {
             self.i += 1;
         }
@@ -1510,15 +1572,18 @@ impl Parser {
                 return;
             }
 
+            // Strong boundaries
             if self.cur_is_punct(";") {
-                self.bump();
+                self.bump(); // consume to avoid repeating the same error on next iteration
                 return;
             }
             if self.cur_is_punct("}") {
+                // Stray close at top level: consume so we can make progress.
                 self.bump();
                 return;
             }
 
+            // Declaration/definition keywords
             if self.cur_is_kw("typedef")
                 || self.cur_is_kw("struct")
                 || self.cur_is_kw("union")
@@ -1527,10 +1592,12 @@ impl Parser {
                 return;
             }
 
+            // Type start (including typedef names)
             if self.peek_type_start() {
                 return;
             }
 
+            // Global statement starts (if allowed)
             if self.cur_is_kw("if")
                 || self.cur_is_kw("for")
                 || self.cur_is_kw("while")
@@ -1540,7 +1607,7 @@ impl Parser {
                 || self.cur_is_kw("break")
                 || self.cur_is_kw("continue")
                 || self.cur_is_kw("goto")
-                || self.cur_is_kw("else")
+            || self.cur_is_kw("else")
             {
                 return;
             }
