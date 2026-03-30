@@ -269,6 +269,30 @@ impl ParseReport {
         v
     }
 
+    fn sorted_errors_by_kind(&self, inserted: bool) -> Vec<&ParseError> {
+        let mut v: Vec<&ParseError> = self
+            .errors
+            .iter()
+            .filter(|e| e.is_inserted() == inserted)
+            .collect();
+        v.sort_by_key(|e| e.sort_key());
+        v
+    }
+
+    fn append_sorted_errors(out: &mut String, errors: &[&ParseError], compact: bool) {
+        for e in errors {
+            if compact {
+                out.push_str(&e.compact());
+                out.push('\n');
+            } else {
+                out.push_str(&e.render());
+                if !out.ends_with('\n') {
+                    out.push('\n');
+                }
+            }
+        }
+    }
+
     pub fn first_error(&self) -> Option<&ParseError> {
         self.errors.iter().min_by_key(|e| e.sort_key())
     }
@@ -299,12 +323,8 @@ impl ParseReport {
 
     pub fn format_real_errors_compact_sorted(&self) -> String {
         let mut out = String::new();
-        let mut v: Vec<&ParseError> = self.errors.iter().filter(|e| !e.is_inserted()).collect();
-        v.sort_by_key(|e| e.sort_key());
-        for e in v {
-            out.push_str(&e.compact());
-            out.push('\n');
-        }
+        let v = self.sorted_errors_by_kind(false);
+        Self::append_sorted_errors(&mut out, &v, true);
         out
     }
 
@@ -346,14 +366,8 @@ impl ParseReport {
             out.push('\n');
         }
 
-        let mut v: Vec<&ParseError> = self.errors.iter().filter(|e| !e.is_inserted()).collect();
-        v.sort_by_key(|e| e.sort_key());
-        for e in v {
-            out.push_str(&e.render());
-            if !out.ends_with('\n') {
-                out.push('\n');
-            }
-        }
+        let v = self.sorted_errors_by_kind(false);
+        Self::append_sorted_errors(&mut out, &v, false);
         out
     }
 
@@ -427,15 +441,11 @@ impl ParseReport {
 
 
     pub fn real_errors(&self) -> Vec<&ParseError> {
-        let mut v: Vec<&ParseError> = self.errors.iter().filter(|e| !e.is_inserted()).collect();
-        v.sort_by_key(|e| e.sort_key());
-        v
+        self.sorted_errors_by_kind(false)
     }
 
     pub fn inserted_errors(&self) -> Vec<&ParseError> {
-        let mut v: Vec<&ParseError> = self.errors.iter().filter(|e| e.is_inserted()).collect();
-        v.sort_by_key(|e| e.sort_key());
-        v
+        self.sorted_errors_by_kind(true)
     }
 
 
@@ -479,25 +489,15 @@ impl ParseReport {
 
     pub fn format_inserted_errors_sorted(&self) -> String {
         let mut out = String::new();
-        let mut v: Vec<&ParseError> = self.errors.iter().filter(|e| e.is_inserted()).collect();
-        v.sort_by_key(|e| e.sort_key());
-        for e in v {
-            out.push_str(&e.render());
-            if !out.ends_with('\n') {
-                out.push('\n');
-            }
-        }
+        let v = self.sorted_errors_by_kind(true);
+        Self::append_sorted_errors(&mut out, &v, false);
         out
     }
 
     pub fn format_inserted_errors_compact_sorted(&self) -> String {
         let mut out = String::new();
-        let mut v: Vec<&ParseError> = self.errors.iter().filter(|e| e.is_inserted()).collect();
-        v.sort_by_key(|e| e.sort_key());
-        for e in v {
-            out.push_str(&e.compact());
-            out.push('\n');
-        }
+        let v = self.sorted_errors_by_kind(true);
+        Self::append_sorted_errors(&mut out, &v, true);
         out
     }
 
@@ -1102,12 +1102,15 @@ impl Parser {
     }
 
     pub fn new(tokens: Vec<Token>, source: String) -> Self {
+        let line_starts = build_line_starts(&source);
+        let max_errors_limit = default_max_errors();
+
         Self {
             tokens,
             i: 0,
             source,
-            line_starts: build_line_starts(&source),
-            max_errors_limit: default_max_errors(),
+            line_starts,
+            max_errors_limit,
             errors: vec![],
             seen_errors: HashSet::new(),
             sorted_errors_cache: RefCell::new(None),
