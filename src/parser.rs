@@ -303,21 +303,15 @@ impl ParseReport {
 
     pub fn format_errors_sorted(&self) -> String {
         let mut out = String::new();
-        for e in self.errors_sorted() {
-            out.push_str(&e.render());
-            if !out.ends_with('\n') {
-                out.push('\n');
-            }
-        }
+        let v = self.errors_sorted();
+        Self::append_sorted_errors(&mut out, &v, false);
         out
     }
 
     pub fn format_errors_compact_sorted(&self) -> String {
         let mut out = String::new();
-        for e in self.errors_sorted() {
-            out.push_str(&e.compact());
-            out.push('\n');
-        }
+        let v = self.errors_sorted();
+        Self::append_sorted_errors(&mut out, &v, true);
         out
     }
 
@@ -538,56 +532,52 @@ impl fmt::Display for ParseReport {
 
 
 impl ParseError {
+    fn expand_tabs_with_width(s: &str, tab_width: usize) -> String {
+        let mut out = String::with_capacity(s.len());
+        let mut col = 0usize;
+        for ch in s.chars() {
+            match ch {
+                '\t' => {
+                    let next = ((col / tab_width) + 1) * tab_width;
+                    let spaces = next.saturating_sub(col).max(1);
+                    out.extend(std::iter::repeat(' ').take(spaces));
+                    col = next;
+                }
+                _ => {
+                    out.push(ch);
+                    col += 1;
+                }
+            }
+        }
+        out
+    }
+
+    fn visual_col_with_width(prefix: &str, tab_width: usize) -> usize {
+        let mut col = 0usize;
+        for ch in prefix.chars() {
+            if ch == '\t' {
+                let next = ((col / tab_width) + 1) * tab_width;
+                col = next;
+            } else {
+                col += 1;
+            }
+        }
+        col
+    }
+
     pub fn render(&self) -> String {
         const TAB_WIDTH: usize = 4;
         const MAX_WIDTH: usize = 140;
 
-
-        fn expand_tabs(s: &str) -> String {
-            let mut out = String::with_capacity(s.len());
-            let mut col = 0usize;
-            for ch in s.chars() {
-                match ch {
-                    '\t' => {
-                        let next = ((col / TAB_WIDTH) + 1) * TAB_WIDTH;
-                        let spaces = next.saturating_sub(col).max(1);
-                        out.extend(std::iter::repeat(' ').take(spaces));
-                        col = next;
-                    }
-                    _ => {
-                        out.push(ch);
-                        col += 1;
-                    }
-                }
-            }
-            out
-        }
-
-        fn visual_col(prefix: &str) -> usize {
-            let mut col = 0usize;
-            for ch in prefix.chars() {
-                if ch == '\t' {
-                    let next = ((col / TAB_WIDTH) + 1) * TAB_WIDTH;
-                    col = next;
-                } else {
-                    col += 1;
-                }
-            }
-            col
-        }
-
-        // Prepare the main line (tabs expanded, CR/LF stripped).
         let raw_line = self.line_text.trim_end_matches(&['\r', '\n'][..]);
-        let expanded = expand_tabs(raw_line);
+        let expanded = Self::expand_tabs_with_width(raw_line, TAB_WIDTH);
 
-        // span.col is 1-based; compute visual caret column (0-based).
         let prefix = raw_line
             .chars()
             .take(self.span.col.saturating_sub(1))
             .collect::<String>();
-        let vcol = visual_col(&prefix);
+        let vcol = Self::visual_col_with_width(&prefix, TAB_WIDTH);
 
-        // Window the line if too long, keeping the caret in view.
         let mut start = 0usize;
         let expanded_chars: Vec<char> = expanded.chars().collect();
         if expanded_chars.len() > MAX_WIDTH {
@@ -596,7 +586,7 @@ impl ParseError {
         if start > expanded_chars.len() {
             start = expanded_chars.len();
         }
-        let mut end = (start + MAX_WIDTH).min(expanded_chars.len());
+        let end = (start + MAX_WIDTH).min(expanded_chars.len());
         if end == expanded_chars.len() && end.saturating_sub(MAX_WIDTH) < start {
             start = end.saturating_sub(MAX_WIDTH);
         }
@@ -622,7 +612,6 @@ impl ParseError {
         caret.push_str(&" ".repeat(caret_pos));
         caret.push_str(&"^".repeat(caret_len));
 
-        // Dynamic gutter width based on the largest line number displayed.
         let mut max_line_no = self.span.line;
         if let Some((ln, _)) = &self.prev_line {
             max_line_no = max_line_no.max(*ln);
@@ -641,7 +630,7 @@ impl ParseError {
         ));
 
         if let Some((ln, txt)) = &self.prev_line {
-            let t = expand_tabs(txt.trim_end_matches(&['\r', '\n'][..]));
+            let t = Self::expand_tabs_with_width(txt.trim_end_matches(&['\r', '\n'][..]), TAB_WIDTH);
             out.push_str(&format!("{}{}\n", mk_prefix(*ln), t));
         }
 
@@ -649,7 +638,7 @@ impl ParseError {
         out.push_str(&format!("{}{}\n", gutter, caret));
 
         if let Some((ln, txt)) = &self.next_line {
-            let t = expand_tabs(txt.trim_end_matches(&['\r', '\n'][..]));
+            let t = Self::expand_tabs_with_width(txt.trim_end_matches(&['\r', '\n'][..]), TAB_WIDTH);
             out.push_str(&format!("{}{}\n", mk_prefix(*ln), t));
         }
 
