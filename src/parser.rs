@@ -263,20 +263,21 @@ impl ParseReport {
         }
     }
 
-    pub fn errors_sorted(&self) -> Vec<&ParseError> {
-        let mut v: Vec<&ParseError> = self.errors.iter().collect();
+    fn sorted_errors_matching<F>(&self, mut pred: F) -> Vec<&ParseError>
+    where
+        F: FnMut(&ParseError) -> bool,
+    {
+        let mut v: Vec<&ParseError> = self.errors.iter().filter(|e| pred(e)).collect();
         v.sort_by_key(|e| e.sort_key());
         v
     }
 
+    pub fn errors_sorted(&self) -> Vec<&ParseError> {
+        self.sorted_errors_matching(|_| true)
+    }
+
     fn sorted_errors_by_kind(&self, inserted: bool) -> Vec<&ParseError> {
-        let mut v: Vec<&ParseError> = self
-            .errors
-            .iter()
-            .filter(|e| e.is_inserted() == inserted)
-            .collect();
-        v.sort_by_key(|e| e.sort_key());
-        v
+        self.sorted_errors_matching(|e| e.is_inserted() == inserted)
     }
 
     fn append_sorted_errors(out: &mut String, errors: &[&ParseError], compact: bool) {
@@ -293,6 +294,12 @@ impl ParseReport {
         }
     }
 
+    fn format_sorted_errors(errors: Vec<&ParseError>, compact: bool) -> String {
+        let mut out = String::new();
+        Self::append_sorted_errors(&mut out, &errors, compact);
+        out
+    }
+
     pub fn first_error(&self) -> Option<&ParseError> {
         self.errors.iter().min_by_key(|e| e.sort_key())
     }
@@ -302,24 +309,15 @@ impl ParseReport {
     }
 
     pub fn format_errors_sorted(&self) -> String {
-        let mut out = String::new();
-        let v = self.errors_sorted();
-        Self::append_sorted_errors(&mut out, &v, false);
-        out
+        Self::format_sorted_errors(self.errors_sorted(), false)
     }
 
     pub fn format_errors_compact_sorted(&self) -> String {
-        let mut out = String::new();
-        let v = self.errors_sorted();
-        Self::append_sorted_errors(&mut out, &v, true);
-        out
+        Self::format_sorted_errors(self.errors_sorted(), true)
     }
 
     pub fn format_real_errors_compact_sorted(&self) -> String {
-        let mut out = String::new();
-        let v = self.sorted_errors_by_kind(false);
-        Self::append_sorted_errors(&mut out, &v, true);
-        out
+        Self::format_sorted_errors(self.sorted_errors_by_kind(false), true)
     }
 
 
@@ -482,17 +480,11 @@ impl ParseReport {
 
 
     pub fn format_inserted_errors_sorted(&self) -> String {
-        let mut out = String::new();
-        let v = self.sorted_errors_by_kind(true);
-        Self::append_sorted_errors(&mut out, &v, false);
-        out
+        Self::format_sorted_errors(self.sorted_errors_by_kind(true), false)
     }
 
     pub fn format_inserted_errors_compact_sorted(&self) -> String {
-        let mut out = String::new();
-        let v = self.sorted_errors_by_kind(true);
-        Self::append_sorted_errors(&mut out, &v, true);
-        out
+        Self::format_sorted_errors(self.sorted_errors_by_kind(true), true)
     }
 
 
@@ -565,30 +557,30 @@ impl ParseError {
         col
     }
 
-    pub fn render(&self) -> String {
-        const TAB_WIDTH: usize = 4;
-        const MAX_WIDTH: usize = 140;
+    pub fn render_with(&self, tab_width: usize, max_width: usize) -> String {
+        let tab_width = tab_width.max(1);
+        let max_width = max_width.max(20);
 
         let raw_line = self.line_text.trim_end_matches(&['\r', '\n'][..]);
-        let expanded = Self::expand_tabs_with_width(raw_line, TAB_WIDTH);
+        let expanded = Self::expand_tabs_with_width(raw_line, tab_width);
 
         let prefix = raw_line
             .chars()
             .take(self.span.col.saturating_sub(1))
             .collect::<String>();
-        let vcol = Self::visual_col_with_width(&prefix, TAB_WIDTH);
+        let vcol = Self::visual_col_with_width(&prefix, tab_width);
 
         let mut start = 0usize;
         let expanded_chars: Vec<char> = expanded.chars().collect();
-        if expanded_chars.len() > MAX_WIDTH {
-            start = vcol.saturating_sub(MAX_WIDTH / 2);
+        if expanded_chars.len() > max_width {
+            start = vcol.saturating_sub(max_width / 2);
         }
         if start > expanded_chars.len() {
             start = expanded_chars.len();
         }
-        let end = (start + MAX_WIDTH).min(expanded_chars.len());
-        if end == expanded_chars.len() && end.saturating_sub(MAX_WIDTH) < start {
-            start = end.saturating_sub(MAX_WIDTH);
+        let end = (start + max_width).min(expanded_chars.len());
+        if end == expanded_chars.len() && end.saturating_sub(max_width) < start {
+            start = end.saturating_sub(max_width);
         }
 
         let mut shown_line: String = expanded_chars[start..end].iter().collect();
@@ -603,7 +595,7 @@ impl ParseError {
 
         let caret_pos = vcol.saturating_sub(start) + if left_ellipsis { 1 } else { 0 };
         let mut caret_len = self.span.len.max(1);
-        let max_caret = MAX_WIDTH.saturating_sub(caret_pos).max(1);
+        let max_caret = max_width.saturating_sub(caret_pos).max(1);
         if caret_len > max_caret {
             caret_len = max_caret;
         }
@@ -630,7 +622,7 @@ impl ParseError {
         ));
 
         if let Some((ln, txt)) = &self.prev_line {
-            let t = Self::expand_tabs_with_width(txt.trim_end_matches(&['\r', '\n'][..]), TAB_WIDTH);
+            let t = Self::expand_tabs_with_width(txt.trim_end_matches(&['\r', '\n'][..]), tab_width);
             out.push_str(&format!("{}{}\n", mk_prefix(*ln), t));
         }
 
@@ -638,7 +630,7 @@ impl ParseError {
         out.push_str(&format!("{}{}\n", gutter, caret));
 
         if let Some((ln, txt)) = &self.next_line {
-            let t = Self::expand_tabs_with_width(txt.trim_end_matches(&['\r', '\n'][..]), TAB_WIDTH);
+            let t = Self::expand_tabs_with_width(txt.trim_end_matches(&['\r', '\n'][..]), tab_width);
             out.push_str(&format!("{}{}\n", mk_prefix(*ln), t));
         }
 
@@ -646,6 +638,10 @@ impl ParseError {
             out.push_str(&format!("help: {}\n", h));
         }
         out
+    }
+
+    pub fn render(&self) -> String {
+        self.render_with(4, 140)
     }
 }
 
