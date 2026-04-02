@@ -557,6 +557,20 @@ impl ParseError {
         col
     }
 
+    fn header_line(&self) -> String {
+        format!(
+            "{}: {} at {}:{}",
+            self.code, self.message, self.span.line, self.span.col
+        )
+    }
+
+    fn compact_line(&self) -> String {
+        format!(
+            "{} {}:{} {}",
+            self.code, self.span.line, self.span.col, self.message
+        )
+    }
+
     pub fn render_with(&self, tab_width: usize, max_width: usize) -> String {
         let tab_width = tab_width.max(1);
         let max_width = max_width.max(20);
@@ -616,10 +630,8 @@ impl ParseError {
         let gutter = format!("{} | ", " ".repeat(w));
 
         let mut out = String::new();
-        out.push_str(&format!(
-            "{}: {} at {}:{}\n",
-            self.code, self.message, self.span.line, self.span.col
-        ));
+        out.push_str(&self.header_line());
+        out.push('\n');
 
         if let Some((ln, txt)) = &self.prev_line {
             let t = Self::expand_tabs_with_width(txt.trim_end_matches(&['\r', '\n'][..]), tab_width);
@@ -658,7 +670,7 @@ impl std::error::Error for ParseError {}
 impl ParseError {
     /// Compact single-line representation: CODE line:col message
     pub fn compact(&self) -> String {
-        format!("{} {}:{} {}", self.code, self.span.line, self.span.col, self.message)
+        self.compact_line()
     }
 
     /// Stable key for sorting/deduping errors by source position.
