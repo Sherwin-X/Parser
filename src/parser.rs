@@ -927,48 +927,45 @@ impl Parser {
         rc
     }
 
-    fn append_errors_sorted_full(&self, out: &mut String) {
+    fn append_errors_sorted_impl(&self, out: &mut String, compact: bool, include_inserted: bool) {
         let idxs = self.sorted_error_indices();
         for &i in idxs.iter() {
-            out.push_str(&self.errors[i].render());
-            if !out.ends_with('\n') {
+            let e = &self.errors[i];
+            if !include_inserted && e.is_inserted() {
+                continue;
+            }
+            if compact {
+                out.push_str(&e.compact());
                 out.push('\n');
+            } else {
+                out.push_str(&e.render());
+                if !out.ends_with('\n') {
+                    out.push('\n');
+                }
             }
         }
+    }
+
+    fn format_sorted_errors_impl(&self, compact: bool, include_inserted: bool) -> String {
+        let mut out = String::new();
+        self.append_errors_sorted_impl(&mut out, compact, include_inserted);
+        out
+    }
+
+    fn append_errors_sorted_full(&self, out: &mut String) {
+        self.append_errors_sorted_impl(out, false, true);
     }
 
     fn append_errors_sorted_compact(&self, out: &mut String) {
-        let idxs = self.sorted_error_indices();
-        for &i in idxs.iter() {
-            out.push_str(&self.errors[i].compact());
-            out.push('\n');
-        }
+        self.append_errors_sorted_impl(out, true, true);
     }
 
     fn append_errors_sorted_full_filtered(&self, out: &mut String, include_inserted: bool) {
-        let idxs = self.sorted_error_indices();
-        for &i in idxs.iter() {
-            let e = &self.errors[i];
-            if !include_inserted && e.is_inserted() {
-                continue;
-            }
-            out.push_str(&e.render());
-            if !out.ends_with('\n') {
-                out.push('\n');
-            }
-        }
+        self.append_errors_sorted_impl(out, false, include_inserted);
     }
 
     fn append_errors_sorted_compact_filtered(&self, out: &mut String, include_inserted: bool) {
-        let idxs = self.sorted_error_indices();
-        for &i in idxs.iter() {
-            let e = &self.errors[i];
-            if !include_inserted && e.is_inserted() {
-                continue;
-            }
-            out.push_str(&e.compact());
-            out.push('\n');
-        }
+        self.append_errors_sorted_impl(out, true, include_inserted);
     }
 
     /// Render all accumulated errors into a single string (useful for tests/logging).
@@ -1031,9 +1028,7 @@ impl Parser {
 
     /// Render only non-inserted ("real") errors in a compact, one-line-per-error format.
     pub fn format_real_errors_compact_sorted(&self) -> String {
-        let mut out = String::new();
-        self.append_errors_sorted_compact_filtered(&mut out, false);
-        out
+        self.format_sorted_errors_impl(true, false)
     }
 
     /// Like `format_errors_sorted`, but the stats header also reports inserted-token counts per code.
@@ -1093,9 +1088,7 @@ impl Parser {
 
     /// Render errors in a compact format, but sorted by source position.
     pub fn format_errors_compact_sorted(&self) -> String {
-        let mut out = String::new();
-        self.append_errors_sorted_compact(&mut out);
-        out
+        self.format_sorted_errors_impl(true, true)
     }
 
     pub fn new(tokens: Vec<Token>, source: String) -> Self {
