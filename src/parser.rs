@@ -280,6 +280,26 @@ impl ParseReport {
         self.sorted_errors_matching(|e| e.is_inserted() == inserted)
     }
 
+    fn first_error_matching<F>(&self, mut pred: F) -> Option<&ParseError>
+    where
+        F: FnMut(&ParseError) -> bool,
+    {
+        self.errors
+            .iter()
+            .filter(|e| pred(e))
+            .min_by_key(|e| e.sort_key())
+    }
+
+    fn last_error_matching<F>(&self, mut pred: F) -> Option<&ParseError>
+    where
+        F: FnMut(&ParseError) -> bool,
+    {
+        self.errors
+            .iter()
+            .filter(|e| pred(e))
+            .max_by_key(|e| e.sort_key())
+    }
+
     fn append_sorted_errors(out: &mut String, errors: &[&ParseError], compact: bool) {
         for e in errors {
             if compact {
@@ -301,11 +321,11 @@ impl ParseReport {
     }
 
     pub fn first_error(&self) -> Option<&ParseError> {
-        self.errors.iter().min_by_key(|e| e.sort_key())
+        self.first_error_matching(|_| true)
     }
 
     pub fn last_error(&self) -> Option<&ParseError> {
-        self.errors.iter().max_by_key(|e| e.sort_key())
+        self.last_error_matching(|_| true)
     }
 
     pub fn format_errors_sorted(&self) -> String {
@@ -442,40 +462,28 @@ impl ParseReport {
 
 
     pub fn first_real_error(&self) -> Option<&ParseError> {
-        self.errors
-            .iter()
-            .filter(|e| !e.is_inserted())
-            .min_by_key(|e| e.sort_key())
+        self.first_error_matching(|e| !e.is_inserted())
     }
 
     pub fn first_inserted_error(&self) -> Option<&ParseError> {
-        self.errors
-            .iter()
-            .filter(|e| e.is_inserted())
-            .min_by_key(|e| e.sort_key())
+        self.first_error_matching(|e| e.is_inserted())
     }
 
     pub fn last_real_error(&self) -> Option<&ParseError> {
-        self.errors
-            .iter()
-            .filter(|e| !e.is_inserted())
-            .max_by_key(|e| e.sort_key())
+        self.last_error_matching(|e| !e.is_inserted())
     }
 
     pub fn last_inserted_error(&self) -> Option<&ParseError> {
-        self.errors
-            .iter()
-            .filter(|e| e.is_inserted())
-            .max_by_key(|e| e.sort_key())
+        self.last_error_matching(|e| e.is_inserted())
     }
 
 
     pub fn has_real_errors(&self) -> bool {
-        self.errors.iter().any(|e| !e.is_inserted())
+        self.first_real_error().is_some()
     }
 
     pub fn has_inserted_errors(&self) -> bool {
-        self.errors.iter().any(|e| e.is_inserted())
+        self.first_inserted_error().is_some()
     }
 
 
