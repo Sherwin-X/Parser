@@ -935,6 +935,41 @@ impl Parser {
         rc
     }
 
+    fn first_error_matching<F>(&self, mut pred: F) -> Option<&ParseError>
+    where
+        F: FnMut(&ParseError) -> bool,
+    {
+        let idxs = self.sorted_error_indices();
+        for &i in idxs.iter() {
+            let e = &self.errors[i];
+            if pred(e) {
+                return Some(e);
+            }
+        }
+        None
+    }
+
+    fn last_error_matching<F>(&self, mut pred: F) -> Option<&ParseError>
+    where
+        F: FnMut(&ParseError) -> bool,
+    {
+        let idxs = self.sorted_error_indices();
+        for &i in idxs.iter().rev() {
+            let e = &self.errors[i];
+            if pred(e) {
+                return Some(e);
+            }
+        }
+        None
+    }
+
+    fn has_error_matching<F>(&self, pred: F) -> bool
+    where
+        F: FnMut(&ParseError) -> bool,
+    {
+        self.first_error_matching(pred).is_some()
+    }
+
     fn append_errors_sorted_impl(&self, out: &mut String, compact: bool, include_inserted: bool) {
         let idxs = self.sorted_error_indices();
         for &i in idxs.iter() {
@@ -1076,12 +1111,36 @@ impl Parser {
 
     /// First error in source order, if any.
     pub fn first_error(&self) -> Option<&ParseError> {
-        self.errors.iter().min_by_key(|e| e.sort_key())
+        self.first_error_matching(|_| true)
     }
 
     /// Last error in source order, if any.
     pub fn last_error(&self) -> Option<&ParseError> {
-        self.errors.iter().max_by_key(|e| e.sort_key())
+        self.last_error_matching(|_| true)
+    }
+
+    pub fn first_real_error(&self) -> Option<&ParseError> {
+        self.first_error_matching(|e| !e.is_inserted())
+    }
+
+    pub fn first_inserted_error(&self) -> Option<&ParseError> {
+        self.first_error_matching(|e| e.is_inserted())
+    }
+
+    pub fn last_real_error(&self) -> Option<&ParseError> {
+        self.last_error_matching(|e| !e.is_inserted())
+    }
+
+    pub fn last_inserted_error(&self) -> Option<&ParseError> {
+        self.last_error_matching(|e| e.is_inserted())
+    }
+
+    pub fn has_real_errors(&self) -> bool {
+        self.has_error_matching(|e| !e.is_inserted())
+    }
+
+    pub fn has_inserted_errors(&self) -> bool {
+        self.has_error_matching(|e| e.is_inserted())
     }
 
     /// Render errors in a compact, one-line-per-error format.
