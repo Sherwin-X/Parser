@@ -495,11 +495,14 @@ impl ParseReport {
     }
 
 
-    pub fn real_error_stats(&self) -> std::collections::BTreeMap<&'static str, usize> {
+    fn error_stats_matching<F>(&self, mut pred: F) -> std::collections::BTreeMap<&'static str, usize>
+    where
+        F: FnMut(&ParseError) -> bool,
+    {
         let mut map: std::collections::BTreeMap<&'static str, usize> =
             std::collections::BTreeMap::new();
         for e in &self.errors {
-            if e.is_inserted() {
+            if !pred(e) {
                 continue;
             }
             *map.entry(e.code).or_insert(0) += 1;
@@ -507,16 +510,12 @@ impl ParseReport {
         map
     }
 
+    pub fn real_error_stats(&self) -> std::collections::BTreeMap<&'static str, usize> {
+        self.error_stats_matching(|e| !e.is_inserted())
+    }
+
     pub fn inserted_error_stats(&self) -> std::collections::BTreeMap<&'static str, usize> {
-        let mut map: std::collections::BTreeMap<&'static str, usize> =
-            std::collections::BTreeMap::new();
-        for e in &self.errors {
-            if !e.is_inserted() {
-                continue;
-            }
-            *map.entry(e.code).or_insert(0) += 1;
-        }
-        map
+        self.error_stats_matching(|e| e.is_inserted())
     }
 
 }
@@ -899,18 +898,7 @@ impl Parser {
         }
     }
 
-    /// Count errors by error code (stable ordering).
-    pub fn error_stats(&self) -> std::collections::BTreeMap<&'static str, usize> {
-        let mut map: std::collections::BTreeMap<&'static str, usize> =
-            std::collections::BTreeMap::new();
-        for e in &self.errors {
-            *map.entry(e.code).or_insert(0) += 1;
-        }
-        map
-    }
-
-    /// Count errors by code, split into (total, inserted).
-    pub fn error_stats_detailed(&self) -> std::collections::BTreeMap<&'static str, (usize, usize)> {
+    fn error_stats_impl(&self) -> std::collections::BTreeMap<&'static str, (usize, usize)> {
         let mut map: std::collections::BTreeMap<&'static str, (usize, usize)> =
             std::collections::BTreeMap::new();
         for e in &self.errors {
@@ -921,6 +909,19 @@ impl Parser {
             }
         }
         map
+    }
+
+    /// Count errors by error code (stable ordering).
+    pub fn error_stats(&self) -> std::collections::BTreeMap<&'static str, usize> {
+        self.error_stats_impl()
+            .into_iter()
+            .map(|(code, (total, _inserted))| (code, total))
+            .collect()
+    }
+
+    /// Count errors by code, split into (total, inserted).
+    pub fn error_stats_detailed(&self) -> std::collections::BTreeMap<&'static str, (usize, usize)> {
+        self.error_stats_impl()
     }
 
     fn sorted_error_indices(&self) -> Rc<Vec<usize>> {
