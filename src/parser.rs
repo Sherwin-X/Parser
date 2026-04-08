@@ -378,8 +378,7 @@ impl ParseReport {
             out.push('\n');
         }
 
-        let v = self.sorted_errors_by_kind(false);
-        Self::append_sorted_errors(&mut out, &v, false);
+        out.push_str(&Self::format_sorted_errors(self.sorted_errors_by_kind(false), false));
         out
     }
 
@@ -1045,7 +1044,7 @@ impl Parser {
             out.push('\n');
         }
 
-        self.append_errors_sorted_full(&mut out);
+        out.push_str(&self.format_sorted_errors_impl(false, true));
         out
     }
 
@@ -1065,7 +1064,7 @@ impl Parser {
             out.push('\n');
         }
 
-        self.append_errors_sorted_full_filtered(&mut out, false);
+        out.push_str(&self.format_sorted_errors_impl(false, false));
         out
     }
 
@@ -1087,7 +1086,7 @@ impl Parser {
         }
         out.push('\n');
 
-        self.append_errors_sorted_full(&mut out);
+        out.push_str(&self.format_sorted_errors_impl(false, true));
         out
     }
 
