@@ -246,9 +246,7 @@ impl ParseReport {
         let ratio = self.error_quality_ratio();
 
         let first = self
-            .errors
-            .iter()
-            .min_by_key(|e| e.sort_key())
+            .first_error()
             .map(|e| e.compact())
             .unwrap_or_else(|| "<unknown>".to_string());
 
@@ -341,16 +339,7 @@ impl ParseReport {
     }
 
 
-    pub fn error_stats(&self) -> std::collections::BTreeMap<&'static str, usize> {
-        let mut map: std::collections::BTreeMap<&'static str, usize> =
-            std::collections::BTreeMap::new();
-        for e in &self.errors {
-            *map.entry(e.code).or_insert(0) += 1;
-        }
-        map
-    }
-
-    pub fn error_stats_detailed(&self) -> std::collections::BTreeMap<&'static str, (usize, usize)> {
+    fn error_stats_impl(&self) -> std::collections::BTreeMap<&'static str, (usize, usize)> {
         let mut map: std::collections::BTreeMap<&'static str, (usize, usize)> =
             std::collections::BTreeMap::new();
         for e in &self.errors {
@@ -361,6 +350,17 @@ impl ParseReport {
             }
         }
         map
+    }
+
+    pub fn error_stats(&self) -> std::collections::BTreeMap<&'static str, usize> {
+        self.error_stats_impl()
+            .into_iter()
+            .map(|(code, (total, _inserted))| (code, total))
+            .collect()
+    }
+
+    pub fn error_stats_detailed(&self) -> std::collections::BTreeMap<&'static str, (usize, usize)> {
+        self.error_stats_impl()
     }
 
     pub fn format_real_errors_sorted(&self, include_stats: bool) -> String {
@@ -911,6 +911,21 @@ impl Parser {
         map
     }
 
+    fn error_stats_matching<F>(&self, mut pred: F) -> std::collections::BTreeMap<&'static str, usize>
+    where
+        F: FnMut(&ParseError) -> bool,
+    {
+        let mut map: std::collections::BTreeMap<&'static str, usize> =
+            std::collections::BTreeMap::new();
+        for e in &self.errors {
+            if !pred(e) {
+                continue;
+            }
+            *map.entry(e.code).or_insert(0) += 1;
+        }
+        map
+    }
+
     /// Count errors by error code (stable ordering).
     pub fn error_stats(&self) -> std::collections::BTreeMap<&'static str, usize> {
         self.error_stats_impl()
@@ -922,6 +937,14 @@ impl Parser {
     /// Count errors by code, split into (total, inserted).
     pub fn error_stats_detailed(&self) -> std::collections::BTreeMap<&'static str, (usize, usize)> {
         self.error_stats_impl()
+    }
+
+    pub fn real_error_stats(&self) -> std::collections::BTreeMap<&'static str, usize> {
+        self.error_stats_matching(|e| !e.is_inserted())
+    }
+
+    pub fn inserted_error_stats(&self) -> std::collections::BTreeMap<&'static str, usize> {
+        self.error_stats_matching(|e| e.is_inserted())
     }
 
     fn sorted_error_indices(&self) -> Rc<Vec<usize>> {
