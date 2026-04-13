@@ -235,20 +235,27 @@ impl ParseReport {
         self.real_error_count() as f64 / self.errors.len() as f64
     }
 
+    fn summary_counts(&self) -> (usize, usize, usize, f64) {
+        let total = self.errors.len();
+        let inserted = self.inserted_error_count();
+        let real = total.saturating_sub(inserted);
+        let ratio = self.error_quality_ratio();
+        (total, real, inserted, ratio)
+    }
+
+    fn first_error_compact(&self) -> String {
+        self.first_error()
+            .map(|e| e.compact())
+            .unwrap_or_else(|| "<unknown>".to_string())
+    }
+
     pub fn summary(&self) -> String {
         if self.errors.is_empty() {
             return "no parser errors".to_string();
         }
 
-        let total = self.errors.len();
-        let inserted = self.inserted_error_count();
-        let real = total.saturating_sub(inserted);
-        let ratio = self.error_quality_ratio();
-
-        let first = self
-            .first_error()
-            .map(|e| e.compact())
-            .unwrap_or_else(|| "<unknown>".to_string());
+        let (total, real, inserted, ratio) = self.summary_counts();
+        let first = self.first_error_compact();
 
         match self.outcome {
             ParseOutcome::Failed => {
@@ -847,6 +854,20 @@ impl Parser {
         self.real_error_count() as f64 / self.errors.len() as f64
     }
 
+    fn summary_counts(&self) -> (usize, usize, usize, f64) {
+        let total = self.errors.len();
+        let inserted = self.inserted_error_count();
+        let real = total.saturating_sub(inserted);
+        let ratio = self.error_quality_ratio();
+        (total, real, inserted, ratio)
+    }
+
+    fn first_error_compact(&self) -> String {
+        self.first_error()
+            .map(|e| e.compact())
+            .unwrap_or_else(|| "<unknown>".to_string())
+    }
+
     /// Whether parsing aborted due to too many errors.
     pub fn has_aborted(&self) -> bool {
         self.aborted
@@ -885,14 +906,8 @@ impl Parser {
             return "no parser errors".to_string();
         }
 
-        let total = self.errors.len();
-        let inserted = self.inserted_error_count();
-        let real = total.saturating_sub(inserted);
-        let ratio = self.error_quality_ratio();
-        let first = self
-            .first_error()
-            .map(|e| e.compact())
-            .unwrap_or_else(|| "<unknown>".to_string());
+        let (total, real, inserted, ratio) = self.summary_counts();
+        let first = self.first_error_compact();
 
         if self.aborted {
             format!(
