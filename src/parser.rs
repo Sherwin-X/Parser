@@ -325,6 +325,14 @@ impl ParseReport {
         out
     }
 
+    fn append_stats_header(&self, out: &mut String) {
+        out.push_str("== Parser error stats ==\n");
+        for (code, n) in self.error_stats() {
+            out.push_str(&format!("{code}: {n}\n"));
+        }
+        out.push('\n');
+    }
+
     fn append_real_stats_header(&self, out: &mut String) {
         out.push_str("== Parser error stats (real only) ==\n");
         for (code, (total, inserted)) in self.error_stats_detailed() {
@@ -357,8 +365,30 @@ impl ParseReport {
         Self::format_sorted_errors(self.errors_sorted(), false)
     }
 
+    pub fn format_errors_sorted_with_stats(&self) -> String {
+        if self.errors.is_empty() {
+            return String::new();
+        }
+
+        let mut out = String::new();
+        self.append_stats_header(&mut out);
+        out.push_str(&self.format_errors_sorted());
+        out
+    }
+
     pub fn format_errors_compact_sorted(&self) -> String {
         Self::format_sorted_errors(self.errors_sorted(), true)
+    }
+
+    pub fn format_errors_compact_sorted_with_stats(&self) -> String {
+        if self.errors.is_empty() {
+            return String::new();
+        }
+
+        let mut out = String::new();
+        self.append_stats_header(&mut out);
+        out.push_str(&self.format_errors_compact_sorted());
+        out
     }
 
     pub fn format_real_errors_compact_sorted(&self) -> String {
@@ -1040,6 +1070,14 @@ impl Parser {
         out
     }
 
+    fn append_stats_header(&self, out: &mut String) {
+        out.push_str("== Parser error stats ==\n");
+        for (code, n) in self.error_stats() {
+            out.push_str(&format!("{code}: {n}\n"));
+        }
+        out.push('\n');
+    }
+
     fn append_real_stats_header(&self, out: &mut String) {
         out.push_str("== Parser error stats (real only) ==\n");
         for (code, (total, inserted)) in self.error_stats_detailed() {
@@ -1103,11 +1141,7 @@ impl Parser {
         let mut out = String::new();
 
         if include_stats && !self.errors.is_empty() {
-            out.push_str("== Parser error stats ==\n");
-            for (code, n) in self.error_stats() {
-                out.push_str(&format!("{code}: {n}\n"));
-            }
-            out.push('\n');
+            self.append_stats_header(&mut out);
         }
 
         out.push_str(&self.format_sorted_errors_impl(false, true));
@@ -1208,6 +1242,17 @@ impl Parser {
     /// Render errors in a compact format, but sorted by source position.
     pub fn format_errors_compact_sorted(&self) -> String {
         self.format_sorted_errors_impl(true, true)
+    }
+
+    pub fn format_errors_compact_sorted_with_stats(&self) -> String {
+        if self.errors.is_empty() {
+            return String::new();
+        }
+
+        let mut out = String::new();
+        self.append_stats_header(&mut out);
+        out.push_str(&self.format_errors_compact_sorted());
+        out
     }
 
     pub fn new(tokens: Vec<Token>, source: String) -> Self {
