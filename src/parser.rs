@@ -376,6 +376,17 @@ impl ParseReport {
         out
     }
 
+    pub fn format_errors(&self) -> String {
+        let mut out = String::new();
+        for e in &self.errors {
+            out.push_str(&e.render());
+            if !out.ends_with('\n') {
+                out.push('\n');
+            }
+        }
+        out
+    }
+
     pub fn format_errors_compact_sorted(&self) -> String {
         Self::format_sorted_errors(self.errors_sorted(), true)
     }
@@ -388,6 +399,17 @@ impl ParseReport {
         let mut out = String::new();
         self.append_stats_header(&mut out);
         out.push_str(&self.format_errors_compact_sorted());
+        out
+    }
+
+    pub fn format_errors_with_stats(&self) -> String {
+        if self.errors.is_empty() {
+            return String::new();
+        }
+
+        let mut out = String::new();
+        self.append_stats_header(&mut out);
+        out.push_str(&self.format_errors());
         out
     }
 
@@ -1120,11 +1142,7 @@ impl Parser {
         let mut out = String::new();
 
         if include_stats && !self.errors.is_empty() {
-            out.push_str("== Parser error stats ==\n");
-            for (code, n) in self.error_stats() {
-                out.push_str(&format!("{code}: {n}\n"));
-            }
-            out.push('\n');
+            self.append_stats_header(&mut out);
         }
 
         for e in &self.errors {
@@ -1236,6 +1254,17 @@ impl Parser {
             out.push_str(&e.compact());
             out.push('\n');
         }
+        out
+    }
+
+    pub fn format_errors_compact_with_stats(&self) -> String {
+        if self.errors.is_empty() {
+            return String::new();
+        }
+
+        let mut out = String::new();
+        self.append_stats_header(&mut out);
+        out.push_str(&self.format_errors_compact());
         out
     }
 
