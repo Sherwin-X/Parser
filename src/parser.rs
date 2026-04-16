@@ -376,16 +376,33 @@ impl ParseReport {
         out
     }
 
-    pub fn format_errors(&self) -> String {
-        let mut out = String::new();
+    fn append_errors_in_original_order(&self, out: &mut String, compact: bool) {
         for e in &self.errors {
-            out.push_str(&e.render());
-            if !out.ends_with('\n') {
-                out.push('\n');
+            if compact {
+                out.push_str(&e.compact());
+                out.push('
+');
+            } else {
+                out.push_str(&e.render());
+                if !out.ends_with('
+') {
+                    out.push('
+');
+                }
             }
         }
+    }
+
+    fn format_errors_in_original_order(&self, compact: bool) -> String {
+        let mut out = String::new();
+        self.append_errors_in_original_order(&mut out, compact);
         out
     }
+
+    pub fn format_errors(&self) -> String {
+        self.format_errors_in_original_order(false)
+    }
+
 
     pub fn format_errors_compact_sorted(&self) -> String {
         Self::format_sorted_errors(self.errors_sorted(), true)
@@ -409,7 +426,7 @@ impl ParseReport {
 
         let mut out = String::new();
         self.append_stats_header(&mut out);
-        out.push_str(&self.format_errors());
+        out.push_str(&self.format_errors_in_original_order(false));
         out
     }
 
@@ -727,19 +744,6 @@ impl ParseError {
     pub fn render(&self) -> String {
         self.render_with(4, 140)
     }
-}
-
-impl fmt::Display for ParseError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // Keep Display concise; use render() when you want full, multi-line diagnostics.
-        write!(f, "{}", self.compact())
-    }
-}
-
-impl std::error::Error for ParseError {}
-
-
-impl ParseError {
     /// Compact single-line representation: CODE line:col message
     pub fn compact(&self) -> String {
         self.compact_line()
@@ -756,6 +760,18 @@ impl ParseError {
     }
 
 }
+
+
+impl fmt::Display for ParseError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Keep Display concise; use render() when you want full, multi-line diagnostics.
+        write!(f, "{}", self.compact())
+    }
+}
+
+impl std::error::Error for ParseError {}
+
+
 
 
 
@@ -1138,6 +1154,30 @@ impl Parser {
 
     /// Render all accumulated errors into a single string (useful for tests/logging).
     /// If `include_stats` is true, a short per-code summary is prepended.
+
+    fn append_errors_in_original_order(&self, out: &mut String, compact: bool) {
+        for e in &self.errors {
+            if compact {
+                out.push_str(&e.compact());
+                out.push('
+');
+            } else {
+                out.push_str(&e.render());
+                if !out.ends_with('
+') {
+                    out.push('
+');
+                }
+            }
+        }
+    }
+
+    fn format_errors_in_original_order(&self, compact: bool) -> String {
+        let mut out = String::new();
+        self.append_errors_in_original_order(&mut out, compact);
+        out
+    }
+
     pub fn format_errors(&self, include_stats: bool) -> String {
         let mut out = String::new();
 
@@ -1145,14 +1185,10 @@ impl Parser {
             self.append_stats_header(&mut out);
         }
 
-        for e in &self.errors {
-            out.push_str(&e.render());
-            if !out.ends_with('\n') {
-                out.push('\n');
-            }
-        }
+        out.push_str(&self.format_errors_in_original_order(false));
         out
     }
+
 
     /// Render full multi-line errors, sorted by source position (line/col/idx/code).
     pub fn format_errors_sorted(&self, include_stats: bool) -> String {
@@ -1249,12 +1285,7 @@ impl Parser {
 
     /// Render errors in a compact, one-line-per-error format.
     pub fn format_errors_compact(&self) -> String {
-        let mut out = String::new();
-        for e in &self.errors {
-            out.push_str(&e.compact());
-            out.push('\n');
-        }
-        out
+        self.format_errors_in_original_order(true)
     }
 
     pub fn format_errors_compact_with_stats(&self) -> String {
@@ -1264,7 +1295,7 @@ impl Parser {
 
         let mut out = String::new();
         self.append_stats_header(&mut out);
-        out.push_str(&self.format_errors_compact());
+        out.push_str(&self.format_errors_in_original_order(true));
         out
     }
 
