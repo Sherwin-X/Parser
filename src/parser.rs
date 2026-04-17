@@ -380,14 +380,11 @@ impl ParseReport {
         for e in &self.errors {
             if compact {
                 out.push_str(&e.compact());
-                out.push('
-');
+                out.push('\n');
             } else {
                 out.push_str(&e.render());
-                if !out.ends_with('
-') {
-                    out.push('
-');
+                if !out.ends_with('\n') {
+                    out.push('\n');
                 }
             }
         }
@@ -427,6 +424,21 @@ impl ParseReport {
         let mut out = String::new();
         self.append_stats_header(&mut out);
         out.push_str(&self.format_errors_in_original_order(false));
+        out
+    }
+
+    pub fn format_errors_compact(&self) -> String {
+        self.format_errors_in_original_order(true)
+    }
+
+    pub fn format_errors_compact_with_stats(&self) -> String {
+        if self.errors.is_empty() {
+            return String::new();
+        }
+
+        let mut out = String::new();
+        self.append_stats_header(&mut out);
+        out.push_str(&self.format_errors_in_original_order(true));
         out
     }
 
@@ -1159,14 +1171,11 @@ impl Parser {
         for e in &self.errors {
             if compact {
                 out.push_str(&e.compact());
-                out.push('
-');
+                out.push('\n');
             } else {
                 out.push_str(&e.render());
-                if !out.ends_with('
-') {
-                    out.push('
-');
+                if !out.ends_with('\n') {
+                    out.push('\n');
                 }
             }
         }
@@ -1311,7 +1320,7 @@ impl Parser {
 
         let mut out = String::new();
         self.append_stats_header(&mut out);
-        out.push_str(&self.format_errors_compact_sorted());
+        out.push_str(&self.format_sorted_errors_impl(true, true));
         out
     }
 
