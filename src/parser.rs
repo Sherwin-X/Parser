@@ -325,15 +325,19 @@ impl ParseReport {
         out
     }
 
-    fn format_with_stats(&self, body: String) -> String {
+    fn format_with_prepended_header(&self, body: String, append_header: fn(&Self, &mut String)) -> String {
         if self.errors.is_empty() {
             return String::new();
         }
 
         let mut out = String::new();
-        self.append_stats_header(&mut out);
+        append_header(self, &mut out);
         out.push_str(&body);
         out
+    }
+
+    fn format_with_stats(&self, body: String) -> String {
+        self.format_with_prepended_header(body, Self::append_stats_header)
     }
 
     fn append_stats_header(&self, out: &mut String) {
@@ -455,25 +459,16 @@ impl ParseReport {
     }
 
     pub fn format_real_errors_sorted(&self, include_stats: bool) -> String {
-        let mut out = String::new();
-
-        if include_stats && !self.errors.is_empty() {
-            self.append_real_stats_header(&mut out);
+        let body = Self::format_sorted_errors(self.sorted_errors_by_kind(false), false);
+        if include_stats {
+            self.format_with_prepended_header(body, Self::append_real_stats_header)
+        } else {
+            body
         }
-
-        out.push_str(&Self::format_sorted_errors(self.sorted_errors_by_kind(false), false));
-        out
     }
 
     pub fn format_errors_sorted_detailed_stats(&self) -> String {
-        if self.errors.is_empty() {
-            return String::new();
-        }
-
-        let mut out = String::new();
-        self.append_detailed_stats_header(&mut out);
-        out.push_str(&self.format_errors_sorted());
-        out
+        self.format_with_prepended_header(self.format_errors_sorted(), Self::append_detailed_stats_header)
     }
 
 
@@ -1103,15 +1098,19 @@ impl Parser {
         out
     }
 
-    fn format_with_stats(&self, body: String) -> String {
+    fn format_with_prepended_header(&self, body: String, append_header: fn(&Self, &mut String)) -> String {
         if self.errors.is_empty() {
             return String::new();
         }
 
         let mut out = String::new();
-        self.append_stats_header(&mut out);
+        append_header(self, &mut out);
         out.push_str(&body);
         out
+    }
+
+    fn format_with_stats(&self, body: String) -> String {
+        self.format_with_prepended_header(body, Self::append_stats_header)
     }
 
     fn append_stats_header(&self, out: &mut String) {
@@ -1207,14 +1206,12 @@ impl Parser {
 
     /// Render only non-inserted ("real") errors in stable source order.
     pub fn format_real_errors_sorted(&self, include_stats: bool) -> String {
-        let mut out = String::new();
-
-        if include_stats && !self.errors.is_empty() {
-            self.append_real_stats_header(&mut out);
+        let body = self.format_sorted_errors_impl(false, false);
+        if include_stats {
+            self.format_with_prepended_header(body, Self::append_real_stats_header)
+        } else {
+            body
         }
-
-        out.push_str(&self.format_sorted_errors_impl(false, false));
-        out
     }
 
     /// Render only non-inserted ("real") errors in a compact, one-line-per-error format.
@@ -1224,14 +1221,10 @@ impl Parser {
 
     /// Like `format_errors_sorted`, but the stats header also reports inserted-token counts per code.
     pub fn format_errors_sorted_detailed_stats(&self) -> String {
-        if self.errors.is_empty() {
-            return String::new();
-        }
-
-        let mut out = String::new();
-        self.append_detailed_stats_header(&mut out);
-        out.push_str(&self.format_sorted_errors_impl(false, true));
-        out
+        self.format_with_prepended_header(
+            self.format_sorted_errors_impl(false, true),
+            Self::append_detailed_stats_header,
+        )
     }
 
     /// Get errors sorted by source position (line/col/idx/code).
