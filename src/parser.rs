@@ -433,6 +433,25 @@ impl ParseReport {
         Self::format_sorted_errors(self.sorted_errors_by_kind(false), true)
     }
 
+    pub fn format_real_errors_compact_sorted_with_stats(&self) -> String {
+        self.format_with_prepended_header(
+            self.format_real_errors_compact_sorted(),
+            Self::append_real_stats_header,
+        )
+    }
+
+    pub fn format_inserted_errors_sorted_with_stats(&self) -> String {
+        self.format_with_stats(self.format_inserted_errors_sorted())
+    }
+
+    pub fn format_inserted_errors_compact_sorted_with_stats(&self) -> String {
+        self.format_with_stats(self.format_inserted_errors_compact_sorted())
+    }
+
+    pub fn format_inserted_errors_compact(&self) -> String {
+        Self::format_sorted_errors(self.sorted_errors_by_kind(true), true)
+    }
+
 
     fn error_stats_impl(&self) -> std::collections::BTreeMap<&'static str, (usize, usize)> {
         let mut map: std::collections::BTreeMap<&'static str, (usize, usize)> =
@@ -565,6 +584,10 @@ impl ParseReport {
 
     pub fn format_inserted_errors_compact_sorted(&self) -> String {
         Self::format_sorted_errors(self.sorted_errors_by_kind(true), true)
+    }
+
+    pub fn format_inserted_errors_compact_with_stats(&self) -> String {
+        self.format_with_stats(self.format_inserted_errors_compact())
     }
 
 
@@ -1219,6 +1242,47 @@ impl Parser {
         self.format_sorted_errors_impl(true, false)
     }
 
+    pub fn format_real_errors_compact_sorted_with_stats(&self) -> String {
+        self.format_with_prepended_header(
+            self.format_real_errors_compact_sorted(),
+            Self::append_real_stats_header,
+        )
+    }
+
+    pub fn format_inserted_errors_sorted(&self) -> String {
+        self.format_sorted_errors_impl(false, true)
+            .lines()
+            .filter(|line| !line.is_empty())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    pub fn format_inserted_errors_compact_sorted(&self) -> String {
+        let idxs = self.sorted_error_indices();
+        let mut out = String::new();
+        for &i in idxs.iter() {
+            let e = &self.errors[i];
+            if !e.is_inserted() {
+                continue;
+            }
+            out.push_str(&e.compact());
+            out.push('\n');
+        }
+        out
+    }
+
+    pub fn format_inserted_errors_compact(&self) -> String {
+        let mut out = String::new();
+        for e in &self.errors {
+            if !e.is_inserted() {
+                continue;
+            }
+            out.push_str(&e.compact());
+            out.push('\n');
+        }
+        out
+    }
+
     /// Like `format_errors_sorted`, but the stats header also reports inserted-token counts per code.
     pub fn format_errors_sorted_detailed_stats(&self) -> String {
         self.format_with_prepended_header(
@@ -1295,6 +1359,25 @@ impl Parser {
 
     pub fn format_errors_compact_sorted_with_stats(&self) -> String {
         self.format_with_stats(self.format_sorted_errors_impl(true, true))
+    }
+
+    pub fn format_inserted_errors_sorted_with_stats(&self) -> String {
+        self.format_with_stats(self.format_inserted_errors_sorted())
+    }
+
+    pub fn format_inserted_errors_compact_sorted_with_stats(&self) -> String {
+        self.format_with_stats(self.format_inserted_errors_compact_sorted())
+    }
+
+    pub fn format_inserted_errors_compact_with_stats(&self) -> String {
+        self.format_with_stats(self.format_inserted_errors_compact())
+    }
+
+    pub fn format_real_errors_compact_with_stats(&self) -> String {
+        self.format_with_prepended_header(
+            self.format_real_errors_compact_sorted(),
+            Self::append_real_stats_header,
+        )
     }
 
     pub fn new(tokens: Vec<Token>, source: String) -> Self {
