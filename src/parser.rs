@@ -1203,6 +1203,29 @@ impl Parser {
         out
     }
 
+    fn append_inserted_errors_in_original_order(&self, out: &mut String, compact: bool) {
+        for e in &self.errors {
+            if !e.is_inserted() {
+                continue;
+            }
+            if compact {
+                out.push_str(&e.compact());
+                out.push('\n');
+            } else {
+                out.push_str(&e.render());
+                if !out.ends_with('\n') {
+                    out.push('\n');
+                }
+            }
+        }
+    }
+
+    fn format_inserted_errors_in_original_order(&self, compact: bool) -> String {
+        let mut out = String::new();
+        self.append_inserted_errors_in_original_order(&mut out, compact);
+        out
+    }
+
     pub fn format_errors(&self, include_stats: bool) -> String {
         let mut out = String::new();
 
@@ -1250,11 +1273,19 @@ impl Parser {
     }
 
     pub fn format_inserted_errors_sorted(&self) -> String {
-        self.format_sorted_errors_impl(false, true)
-            .lines()
-            .filter(|line| !line.is_empty())
-            .collect::<Vec<_>>()
-            .join("\n")
+        let idxs = self.sorted_error_indices();
+        let mut out = String::new();
+        for &i in idxs.iter() {
+            let e = &self.errors[i];
+            if !e.is_inserted() {
+                continue;
+            }
+            out.push_str(&e.render());
+            if !out.ends_with('\n') {
+                out.push('\n');
+            }
+        }
+        out
     }
 
     pub fn format_inserted_errors_compact_sorted(&self) -> String {
@@ -1272,15 +1303,11 @@ impl Parser {
     }
 
     pub fn format_inserted_errors_compact(&self) -> String {
-        let mut out = String::new();
-        for e in &self.errors {
-            if !e.is_inserted() {
-                continue;
-            }
-            out.push_str(&e.compact());
-            out.push('\n');
-        }
-        out
+        self.format_inserted_errors_in_original_order(true)
+    }
+
+    pub fn format_inserted_errors(&self) -> String {
+        self.format_inserted_errors_in_original_order(false)
     }
 
     /// Like `format_errors_sorted`, but the stats header also reports inserted-token counts per code.
@@ -1370,7 +1397,11 @@ impl Parser {
     }
 
     pub fn format_inserted_errors_compact_with_stats(&self) -> String {
-        self.format_with_stats(self.format_inserted_errors_compact())
+        self.format_with_stats(self.format_inserted_errors_in_original_order(true))
+    }
+
+    pub fn format_inserted_errors_with_stats(&self) -> String {
+        self.format_with_stats(self.format_inserted_errors_in_original_order(false))
     }
 
     pub fn format_real_errors_compact_with_stats(&self) -> String {
