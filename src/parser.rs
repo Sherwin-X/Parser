@@ -404,6 +404,29 @@ impl ParseReport {
         out
     }
 
+    fn append_inserted_errors_in_original_order(&self, out: &mut String, compact: bool) {
+        for e in &self.errors {
+            if !e.is_inserted() {
+                continue;
+            }
+            if compact {
+                out.push_str(&e.compact());
+                out.push('\n');
+            } else {
+                out.push_str(&e.render());
+                if !out.ends_with('\n') {
+                    out.push('\n');
+                }
+            }
+        }
+    }
+
+    fn format_inserted_errors_in_original_order(&self, compact: bool) -> String {
+        let mut out = String::new();
+        self.append_inserted_errors_in_original_order(&mut out, compact);
+        out
+    }
+
     pub fn format_errors(&self) -> String {
         self.format_errors_in_original_order(false)
     }
@@ -449,7 +472,11 @@ impl ParseReport {
     }
 
     pub fn format_inserted_errors_compact(&self) -> String {
-        Self::format_sorted_errors(self.sorted_errors_by_kind(true), true)
+        self.format_inserted_errors_in_original_order(true)
+    }
+
+    pub fn format_inserted_errors(&self) -> String {
+        self.format_inserted_errors_in_original_order(false)
     }
 
 
@@ -587,7 +614,11 @@ impl ParseReport {
     }
 
     pub fn format_inserted_errors_compact_with_stats(&self) -> String {
-        self.format_with_stats(self.format_inserted_errors_compact())
+        self.format_with_stats(self.format_inserted_errors_in_original_order(true))
+    }
+
+    pub fn format_inserted_errors_with_stats(&self) -> String {
+        self.format_with_stats(self.format_inserted_errors_in_original_order(false))
     }
 
 
