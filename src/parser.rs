@@ -1152,6 +1152,31 @@ impl Parser {
         out
     }
 
+    fn append_inserted_errors_sorted_impl(&self, out: &mut String, compact: bool) {
+        let idxs = self.sorted_error_indices();
+        for &i in idxs.iter() {
+            let e = &self.errors[i];
+            if !e.is_inserted() {
+                continue;
+            }
+            if compact {
+                out.push_str(&e.compact());
+                out.push('\n');
+            } else {
+                out.push_str(&e.render());
+                if !out.ends_with('\n') {
+                    out.push('\n');
+                }
+            }
+        }
+    }
+
+    fn format_inserted_errors_sorted_impl(&self, compact: bool) -> String {
+        let mut out = String::new();
+        self.append_inserted_errors_sorted_impl(&mut out, compact);
+        out
+    }
+
     fn format_with_prepended_header(&self, body: String, append_header: fn(&Self, &mut String)) -> String {
         if self.errors.is_empty() {
             return String::new();
@@ -1304,33 +1329,11 @@ impl Parser {
     }
 
     pub fn format_inserted_errors_sorted(&self) -> String {
-        let idxs = self.sorted_error_indices();
-        let mut out = String::new();
-        for &i in idxs.iter() {
-            let e = &self.errors[i];
-            if !e.is_inserted() {
-                continue;
-            }
-            out.push_str(&e.render());
-            if !out.ends_with('\n') {
-                out.push('\n');
-            }
-        }
-        out
+        self.format_inserted_errors_sorted_impl(false)
     }
 
     pub fn format_inserted_errors_compact_sorted(&self) -> String {
-        let idxs = self.sorted_error_indices();
-        let mut out = String::new();
-        for &i in idxs.iter() {
-            let e = &self.errors[i];
-            if !e.is_inserted() {
-                continue;
-            }
-            out.push_str(&e.compact());
-            out.push('\n');
-        }
-        out
+        self.format_inserted_errors_sorted_impl(true)
     }
 
     pub fn format_inserted_errors_compact(&self) -> String {
@@ -1420,11 +1423,11 @@ impl Parser {
     }
 
     pub fn format_inserted_errors_sorted_with_stats(&self) -> String {
-        self.format_with_stats(self.format_inserted_errors_sorted())
+        self.format_with_stats(self.format_inserted_errors_sorted_impl(false))
     }
 
     pub fn format_inserted_errors_compact_sorted_with_stats(&self) -> String {
-        self.format_with_stats(self.format_inserted_errors_compact_sorted())
+        self.format_with_stats(self.format_inserted_errors_sorted_impl(true))
     }
 
     pub fn format_inserted_errors_compact_with_stats(&self) -> String {
