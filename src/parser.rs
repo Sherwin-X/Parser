@@ -438,6 +438,29 @@ impl ParseReport {
         out
     }
 
+    fn append_real_errors_in_original_order(&self, out: &mut String, compact: bool) {
+        for e in &self.errors {
+            if e.is_inserted() {
+                continue;
+            }
+            if compact {
+                out.push_str(&e.compact());
+                out.push('\n');
+            } else {
+                out.push_str(&e.render());
+                if !out.ends_with('\n') {
+                    out.push('\n');
+                }
+            }
+        }
+    }
+
+    fn format_real_errors_in_original_order(&self, compact: bool) -> String {
+        let mut out = String::new();
+        self.append_real_errors_in_original_order(&mut out, compact);
+        out
+    }
+
     pub fn format_errors(&self) -> String {
         self.format_errors_in_original_order(false)
     }
@@ -461,6 +484,28 @@ impl ParseReport {
 
     pub fn format_errors_compact_with_stats(&self) -> String {
         self.format_with_stats(self.format_errors_in_original_order(true))
+    }
+
+    pub fn format_real_errors(&self) -> String {
+        self.format_real_errors_in_original_order(false)
+    }
+
+    pub fn format_real_errors_with_stats(&self) -> String {
+        self.format_with_prepended_header(
+            self.format_real_errors_in_original_order(false),
+            Self::append_real_stats_header,
+        )
+    }
+
+    pub fn format_real_errors_compact(&self) -> String {
+        self.format_real_errors_in_original_order(true)
+    }
+
+    pub fn format_real_errors_compact_with_stats(&self) -> String {
+        self.format_with_prepended_header(
+            self.format_real_errors_in_original_order(true),
+            Self::append_real_stats_header,
+        )
     }
 
     pub fn format_real_errors_compact_sorted(&self) -> String {
@@ -1293,6 +1338,29 @@ impl Parser {
         out
     }
 
+    fn append_real_errors_in_original_order(&self, out: &mut String, compact: bool) {
+        for e in &self.errors {
+            if e.is_inserted() {
+                continue;
+            }
+            if compact {
+                out.push_str(&e.compact());
+                out.push('\n');
+            } else {
+                out.push_str(&e.render());
+                if !out.ends_with('\n') {
+                    out.push('\n');
+                }
+            }
+        }
+    }
+
+    fn format_real_errors_in_original_order(&self, compact: bool) -> String {
+        let mut out = String::new();
+        self.append_real_errors_in_original_order(&mut out, compact);
+        out
+    }
+
     pub fn format_errors(&self, include_stats: bool) -> String {
         let mut out = String::new();
 
@@ -1424,6 +1492,28 @@ impl Parser {
         self.format_with_stats(self.format_errors_in_original_order(true))
     }
 
+    pub fn format_real_errors(&self) -> String {
+        self.format_real_errors_in_original_order(false)
+    }
+
+    pub fn format_real_errors_with_stats(&self) -> String {
+        self.format_with_prepended_header(
+            self.format_real_errors_in_original_order(false),
+            Self::append_real_stats_header,
+        )
+    }
+
+    pub fn format_real_errors_compact(&self) -> String {
+        self.format_real_errors_in_original_order(true)
+    }
+
+    pub fn format_real_errors_compact_with_stats(&self) -> String {
+        self.format_with_prepended_header(
+            self.format_real_errors_in_original_order(true),
+            Self::append_real_stats_header,
+        )
+    }
+
     /// Render errors in a compact format, but sorted by source position.
     pub fn format_errors_compact_sorted(&self) -> String {
         self.format_sorted_errors_impl(true, true)
@@ -1449,12 +1539,7 @@ impl Parser {
         self.format_with_stats(self.format_inserted_errors_in_original_order(false))
     }
 
-    pub fn format_real_errors_compact_with_stats(&self) -> String {
-        self.format_with_prepended_header(
-            self.format_real_errors_compact_sorted(),
-            Self::append_real_stats_header,
-        )
-    }
+
 
     pub fn new(tokens: Vec<Token>, source: String) -> Self {
         let line_starts = build_line_starts(&source);
