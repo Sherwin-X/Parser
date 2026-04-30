@@ -395,8 +395,14 @@ impl ParseReport {
         self.format_with_stats(self.format_errors_sorted())
     }
 
-    fn append_errors_in_original_order(&self, out: &mut String, compact: bool) {
+    fn append_errors_in_original_order_matching<F>(&self, out: &mut String, compact: bool, mut pred: F)
+    where
+        F: FnMut(&ParseError) -> bool,
+    {
         for e in &self.errors {
+            if !pred(e) {
+                continue;
+            }
             if compact {
                 out.push_str(&e.compact());
                 out.push('\n');
@@ -407,58 +413,27 @@ impl ParseReport {
                 }
             }
         }
+    }
+
+    fn format_errors_in_original_order_matching<F>(&self, compact: bool, pred: F) -> String
+    where
+        F: FnMut(&ParseError) -> bool,
+    {
+        let mut out = String::new();
+        self.append_errors_in_original_order_matching(&mut out, compact, pred);
+        out
     }
 
     fn format_errors_in_original_order(&self, compact: bool) -> String {
-        let mut out = String::new();
-        self.append_errors_in_original_order(&mut out, compact);
-        out
-    }
-
-    fn append_inserted_errors_in_original_order(&self, out: &mut String, compact: bool) {
-        for e in &self.errors {
-            if !e.is_inserted() {
-                continue;
-            }
-            if compact {
-                out.push_str(&e.compact());
-                out.push('\n');
-            } else {
-                out.push_str(&e.render());
-                if !out.ends_with('\n') {
-                    out.push('\n');
-                }
-            }
-        }
+        self.format_errors_in_original_order_matching(compact, |_| true)
     }
 
     fn format_inserted_errors_in_original_order(&self, compact: bool) -> String {
-        let mut out = String::new();
-        self.append_inserted_errors_in_original_order(&mut out, compact);
-        out
-    }
-
-    fn append_real_errors_in_original_order(&self, out: &mut String, compact: bool) {
-        for e in &self.errors {
-            if e.is_inserted() {
-                continue;
-            }
-            if compact {
-                out.push_str(&e.compact());
-                out.push('\n');
-            } else {
-                out.push_str(&e.render());
-                if !out.ends_with('\n') {
-                    out.push('\n');
-                }
-            }
-        }
+        self.format_errors_in_original_order_matching(compact, |e| e.is_inserted())
     }
 
     fn format_real_errors_in_original_order(&self, compact: bool) -> String {
-        let mut out = String::new();
-        self.append_real_errors_in_original_order(&mut out, compact);
-        out
+        self.format_errors_in_original_order_matching(compact, |e| !e.is_inserted())
     }
 
     pub fn format_errors(&self) -> String {
@@ -1295,8 +1270,14 @@ impl Parser {
     /// Render all accumulated errors into a single string (useful for tests/logging).
     /// If `include_stats` is true, a short per-code summary is prepended.
 
-    fn append_errors_in_original_order(&self, out: &mut String, compact: bool) {
+    fn append_errors_in_original_order_matching<F>(&self, out: &mut String, compact: bool, mut pred: F)
+    where
+        F: FnMut(&ParseError) -> bool,
+    {
         for e in &self.errors {
+            if !pred(e) {
+                continue;
+            }
             if compact {
                 out.push_str(&e.compact());
                 out.push('\n');
@@ -1307,58 +1288,27 @@ impl Parser {
                 }
             }
         }
+    }
+
+    fn format_errors_in_original_order_matching<F>(&self, compact: bool, pred: F) -> String
+    where
+        F: FnMut(&ParseError) -> bool,
+    {
+        let mut out = String::new();
+        self.append_errors_in_original_order_matching(&mut out, compact, pred);
+        out
     }
 
     fn format_errors_in_original_order(&self, compact: bool) -> String {
-        let mut out = String::new();
-        self.append_errors_in_original_order(&mut out, compact);
-        out
-    }
-
-    fn append_inserted_errors_in_original_order(&self, out: &mut String, compact: bool) {
-        for e in &self.errors {
-            if !e.is_inserted() {
-                continue;
-            }
-            if compact {
-                out.push_str(&e.compact());
-                out.push('\n');
-            } else {
-                out.push_str(&e.render());
-                if !out.ends_with('\n') {
-                    out.push('\n');
-                }
-            }
-        }
+        self.format_errors_in_original_order_matching(compact, |_| true)
     }
 
     fn format_inserted_errors_in_original_order(&self, compact: bool) -> String {
-        let mut out = String::new();
-        self.append_inserted_errors_in_original_order(&mut out, compact);
-        out
-    }
-
-    fn append_real_errors_in_original_order(&self, out: &mut String, compact: bool) {
-        for e in &self.errors {
-            if e.is_inserted() {
-                continue;
-            }
-            if compact {
-                out.push_str(&e.compact());
-                out.push('\n');
-            } else {
-                out.push_str(&e.render());
-                if !out.ends_with('\n') {
-                    out.push('\n');
-                }
-            }
-        }
+        self.format_errors_in_original_order_matching(compact, |e| e.is_inserted())
     }
 
     fn format_real_errors_in_original_order(&self, compact: bool) -> String {
-        let mut out = String::new();
-        self.append_real_errors_in_original_order(&mut out, compact);
-        out
+        self.format_errors_in_original_order_matching(compact, |e| !e.is_inserted())
     }
 
     pub fn format_errors(&self, include_stats: bool) -> String {
