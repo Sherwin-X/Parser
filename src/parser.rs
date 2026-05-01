@@ -1158,11 +1158,14 @@ impl Parser {
         self.first_error_matching(pred).is_some()
     }
 
-    fn append_errors_sorted_impl(&self, out: &mut String, compact: bool, include_inserted: bool) {
+    fn append_errors_sorted_matching<F>(&self, out: &mut String, compact: bool, mut pred: F)
+    where
+        F: FnMut(&ParseError) -> bool,
+    {
         let idxs = self.sorted_error_indices();
         for &i in idxs.iter() {
             let e = &self.errors[i];
-            if !include_inserted && e.is_inserted() {
+            if !pred(e) {
                 continue;
             }
             if compact {
@@ -1177,35 +1180,25 @@ impl Parser {
         }
     }
 
-    fn format_sorted_errors_impl(&self, compact: bool, include_inserted: bool) -> String {
+    fn format_errors_sorted_matching<F>(&self, compact: bool, pred: F) -> String
+    where
+        F: FnMut(&ParseError) -> bool,
+    {
         let mut out = String::new();
-        self.append_errors_sorted_impl(&mut out, compact, include_inserted);
+        self.append_errors_sorted_matching(&mut out, compact, pred);
         out
     }
 
-    fn append_inserted_errors_sorted_impl(&self, out: &mut String, compact: bool) {
-        let idxs = self.sorted_error_indices();
-        for &i in idxs.iter() {
-            let e = &self.errors[i];
-            if !e.is_inserted() {
-                continue;
-            }
-            if compact {
-                out.push_str(&e.compact());
-                out.push('\n');
-            } else {
-                out.push_str(&e.render());
-                if !out.ends_with('\n') {
-                    out.push('\n');
-                }
-            }
+    fn format_sorted_errors_impl(&self, compact: bool, include_inserted: bool) -> String {
+        if include_inserted {
+            self.format_errors_sorted_matching(compact, |_| true)
+        } else {
+            self.format_errors_sorted_matching(compact, |e| !e.is_inserted())
         }
     }
 
     fn format_inserted_errors_sorted_impl(&self, compact: bool) -> String {
-        let mut out = String::new();
-        self.append_inserted_errors_sorted_impl(&mut out, compact);
-        out
+        self.format_errors_sorted_matching(compact, |e| e.is_inserted())
     }
 
     fn format_with_prepended_header(&self, body: String, append_header: fn(&Self, &mut String)) -> String {
@@ -1252,19 +1245,27 @@ impl Parser {
     }
 
     fn append_errors_sorted_full(&self, out: &mut String) {
-        self.append_errors_sorted_impl(out, false, true);
+        self.append_errors_sorted_matching(out, false, |_| true);
     }
 
     fn append_errors_sorted_compact(&self, out: &mut String) {
-        self.append_errors_sorted_impl(out, true, true);
+        self.append_errors_sorted_matching(out, true, |_| true);
     }
 
     fn append_errors_sorted_full_filtered(&self, out: &mut String, include_inserted: bool) {
-        self.append_errors_sorted_impl(out, false, include_inserted);
+        if include_inserted {
+            self.append_errors_sorted_matching(out, false, |_| true);
+        } else {
+            self.append_errors_sorted_matching(out, false, |e| !e.is_inserted());
+        }
     }
 
     fn append_errors_sorted_compact_filtered(&self, out: &mut String, include_inserted: bool) {
-        self.append_errors_sorted_impl(out, true, include_inserted);
+        if include_inserted {
+            self.append_errors_sorted_matching(out, true, |_| true);
+        } else {
+            self.append_errors_sorted_matching(out, true, |e| !e.is_inserted());
+        }
     }
 
     /// Render all accumulated errors into a single string (useful for tests/logging).
