@@ -325,15 +325,25 @@ impl ParseReport {
         out
     }
 
-    fn append_inserted_errors_sorted(&self, out: &mut String, compact: bool) {
-        let errors = self.sorted_errors_by_kind(true);
+    fn append_sorted_errors_matching<F>(&self, out: &mut String, compact: bool, pred: F)
+    where
+        F: FnMut(&ParseError) -> bool,
+    {
+        let errors = self.sorted_errors_matching(pred);
         Self::append_sorted_errors(out, &errors, compact);
     }
 
-    fn format_inserted_errors_sorted_impl(&self, compact: bool) -> String {
+    fn format_sorted_errors_matching<F>(&self, compact: bool, pred: F) -> String
+    where
+        F: FnMut(&ParseError) -> bool,
+    {
         let mut out = String::new();
-        self.append_inserted_errors_sorted(&mut out, compact);
+        self.append_sorted_errors_matching(&mut out, compact, pred);
         out
+    }
+
+    fn format_inserted_errors_sorted_impl(&self, compact: bool) -> String {
+        self.format_sorted_errors_matching(compact, |e| e.is_inserted())
     }
 
     fn format_with_prepended_header(&self, body: String, append_header: fn(&Self, &mut String)) -> String {
@@ -388,7 +398,7 @@ impl ParseReport {
     }
 
     pub fn format_errors_sorted(&self) -> String {
-        Self::format_sorted_errors(self.errors_sorted(), false)
+        self.format_sorted_errors_matching(false, |_| true)
     }
 
     pub fn format_errors_sorted_with_stats(&self) -> String {
@@ -442,7 +452,7 @@ impl ParseReport {
 
 
     pub fn format_errors_compact_sorted(&self) -> String {
-        Self::format_sorted_errors(self.errors_sorted(), true)
+        self.format_sorted_errors_matching(true, |_| true)
     }
 
     pub fn format_errors_compact_sorted_with_stats(&self) -> String {
@@ -484,7 +494,7 @@ impl ParseReport {
     }
 
     pub fn format_real_errors_compact_sorted(&self) -> String {
-        Self::format_sorted_errors(self.sorted_errors_by_kind(false), true)
+        self.format_sorted_errors_matching(true, |e| !e.is_inserted())
     }
 
     pub fn format_real_errors_compact_sorted_with_stats(&self) -> String {
@@ -536,7 +546,7 @@ impl ParseReport {
     }
 
     pub fn format_real_errors_sorted(&self, include_stats: bool) -> String {
-        let body = Self::format_sorted_errors(self.sorted_errors_by_kind(false), false);
+        let body = self.format_sorted_errors_matching(false, |e| !e.is_inserted());
         if include_stats {
             self.format_with_prepended_header(body, Self::append_real_stats_header)
         } else {
