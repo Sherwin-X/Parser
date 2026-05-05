@@ -353,6 +353,10 @@ impl ParseReport {
         self.format_sorted_errors_matching(compact, |e| e.is_inserted())
     }
 
+    fn format_real_errors_sorted_impl(&self, compact: bool) -> String {
+        self.format_sorted_errors_matching(compact, |e| !e.is_inserted())
+    }
+
     fn format_with_prepended_header(&self, body: String, append_header: fn(&Self, &mut String)) -> String {
         if self.errors.is_empty() {
             return String::new();
@@ -501,7 +505,7 @@ impl ParseReport {
     }
 
     pub fn format_real_errors_compact_sorted(&self) -> String {
-        self.format_sorted_errors_matching(true, |e| !e.is_inserted())
+        self.format_real_errors_sorted_impl(true)
     }
 
     pub fn format_real_errors_compact_sorted_with_stats(&self) -> String {
@@ -553,7 +557,7 @@ impl ParseReport {
     }
 
     pub fn format_real_errors_sorted(&self, include_stats: bool) -> String {
-        let body = self.format_sorted_errors_matching(false, |e| !e.is_inserted());
+        let body = self.format_real_errors_sorted_impl(false);
         if include_stats {
             self.format_with_prepended_header(body, Self::append_real_stats_header)
         } else {
@@ -1218,6 +1222,10 @@ impl Parser {
         self.format_errors_sorted_matching(compact, |e| e.is_inserted())
     }
 
+    fn format_real_errors_sorted_impl(&self, compact: bool) -> String {
+        self.format_errors_sorted_matching(compact, |e| !e.is_inserted())
+    }
+
     fn format_with_prepended_header(&self, body: String, append_header: fn(&Self, &mut String)) -> String {
         if self.errors.is_empty() {
             return String::new();
@@ -1355,7 +1363,7 @@ impl Parser {
 
     /// Render only non-inserted ("real") errors in stable source order.
     pub fn format_real_errors_sorted(&self, include_stats: bool) -> String {
-        let body = self.format_sorted_errors_impl(false, false);
+        let body = self.format_real_errors_sorted_impl(false);
         if include_stats {
             self.format_with_prepended_header(body, Self::append_real_stats_header)
         } else {
@@ -1365,7 +1373,7 @@ impl Parser {
 
     /// Render only non-inserted ("real") errors in a compact, one-line-per-error format.
     pub fn format_real_errors_compact_sorted(&self) -> String {
-        self.format_sorted_errors_impl(true, false)
+        self.format_real_errors_sorted_impl(true)
     }
 
     pub fn format_real_errors_compact_sorted_with_stats(&self) -> String {
