@@ -305,6 +305,13 @@ impl ParseReport {
             .max_by_key(|e| e.sort_key())
     }
 
+    fn has_error_matching<F>(&self, pred: F) -> bool
+    where
+        F: FnMut(&ParseError) -> bool,
+    {
+        self.first_error_matching(pred).is_some()
+    }
+
     fn append_sorted_errors(out: &mut String, errors: &[&ParseError], compact: bool) {
         for e in errors {
             if compact {
@@ -638,11 +645,11 @@ impl ParseReport {
 
 
     pub fn has_real_errors(&self) -> bool {
-        self.first_real_error().is_some()
+        self.has_error_matching(|e| !e.is_inserted())
     }
 
     pub fn has_inserted_errors(&self) -> bool {
-        self.first_inserted_error().is_some()
+        self.has_error_matching(|e| e.is_inserted())
     }
 
 
