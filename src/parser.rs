@@ -326,11 +326,6 @@ impl ParseReport {
         }
     }
 
-    fn format_sorted_errors(errors: Vec<&ParseError>, compact: bool) -> String {
-        let mut out = String::new();
-        Self::append_sorted_errors(&mut out, &errors, compact);
-        out
-    }
 
     fn append_sorted_errors_matching<F>(&self, out: &mut String, compact: bool, pred: F)
     where
@@ -1269,29 +1264,6 @@ impl Parser {
         out.push('\n');
     }
 
-    fn append_errors_sorted_full(&self, out: &mut String) {
-        self.append_errors_sorted_matching(out, false, |_| true);
-    }
-
-    fn append_errors_sorted_compact(&self, out: &mut String) {
-        self.append_errors_sorted_matching(out, true, |_| true);
-    }
-
-    fn append_errors_sorted_full_filtered(&self, out: &mut String, include_inserted: bool) {
-        if include_inserted {
-            self.append_errors_sorted_matching(out, false, |_| true);
-        } else {
-            self.append_errors_sorted_matching(out, false, |e| !e.is_inserted());
-        }
-    }
-
-    fn append_errors_sorted_compact_filtered(&self, out: &mut String, include_inserted: bool) {
-        if include_inserted {
-            self.append_errors_sorted_matching(out, true, |_| true);
-        } else {
-            self.append_errors_sorted_matching(out, true, |e| !e.is_inserted());
-        }
-    }
 
     /// Render all accumulated errors into a single string (useful for tests/logging).
     /// If `include_stats` is true, a short per-code summary is prepended.
