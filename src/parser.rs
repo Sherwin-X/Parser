@@ -312,17 +312,21 @@ impl ParseReport {
         self.first_error_matching(pred).is_some()
     }
 
+    fn append_error(out: &mut String, e: &ParseError, compact: bool) {
+        if compact {
+            out.push_str(&e.compact());
+            out.push('\n');
+        } else {
+            out.push_str(&e.render());
+            if !out.ends_with('\n') {
+                out.push('\n');
+            }
+        }
+    }
+
     fn append_sorted_errors(out: &mut String, errors: &[&ParseError], compact: bool) {
         for e in errors {
-            if compact {
-                out.push_str(&e.compact());
-                out.push('\n');
-            } else {
-                out.push_str(&e.render());
-                if !out.ends_with('\n') {
-                    out.push('\n');
-                }
-            }
+            Self::append_error(out, e, compact);
         }
     }
 
@@ -419,15 +423,7 @@ impl ParseReport {
             if !pred(e) {
                 continue;
             }
-            if compact {
-                out.push_str(&e.compact());
-                out.push('\n');
-            } else {
-                out.push_str(&e.render());
-                if !out.ends_with('\n') {
-                    out.push('\n');
-                }
-            }
+            Self::append_error(out, e, compact);
         }
     }
 
@@ -1174,6 +1170,18 @@ impl Parser {
         self.first_error_matching(pred).is_some()
     }
 
+    fn append_error(out: &mut String, e: &ParseError, compact: bool) {
+        if compact {
+            out.push_str(&e.compact());
+            out.push('\n');
+        } else {
+            out.push_str(&e.render());
+            if !out.ends_with('\n') {
+                out.push('\n');
+            }
+        }
+    }
+
     fn append_errors_sorted_matching<F>(&self, out: &mut String, compact: bool, mut pred: F)
     where
         F: FnMut(&ParseError) -> bool,
@@ -1184,15 +1192,7 @@ impl Parser {
             if !pred(e) {
                 continue;
             }
-            if compact {
-                out.push_str(&e.compact());
-                out.push('\n');
-            } else {
-                out.push_str(&e.render());
-                if !out.ends_with('\n') {
-                    out.push('\n');
-                }
-            }
+            Self::append_error(out, e, compact);
         }
     }
 
@@ -1276,15 +1276,7 @@ impl Parser {
             if !pred(e) {
                 continue;
             }
-            if compact {
-                out.push_str(&e.compact());
-                out.push('\n');
-            } else {
-                out.push_str(&e.render());
-                if !out.ends_with('\n') {
-                    out.push('\n');
-                }
-            }
+            Self::append_error(out, e, compact);
         }
     }
 
