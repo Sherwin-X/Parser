@@ -1302,27 +1302,23 @@ impl Parser {
     }
 
     pub fn format_errors(&self, include_stats: bool) -> String {
-        let mut out = String::new();
-
-        if include_stats && !self.errors.is_empty() {
-            self.append_stats_header(&mut out);
+        let body = self.format_errors_in_original_order(false);
+        if include_stats {
+            self.format_with_stats(body)
+        } else {
+            body
         }
-
-        out.push_str(&self.format_errors_in_original_order(false));
-        out
     }
 
 
     /// Render full multi-line errors, sorted by source position (line/col/idx/code).
     pub fn format_errors_sorted(&self, include_stats: bool) -> String {
-        let mut out = String::new();
-
-        if include_stats && !self.errors.is_empty() {
-            self.append_stats_header(&mut out);
+        let body = self.format_sorted_errors_impl(false, true);
+        if include_stats {
+            self.format_with_stats(body)
+        } else {
+            body
         }
-
-        out.push_str(&self.format_sorted_errors_impl(false, true));
-        out
     }
 
     /// Render only non-inserted ("real") errors in stable source order.
