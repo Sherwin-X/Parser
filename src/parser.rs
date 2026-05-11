@@ -371,6 +371,14 @@ impl ParseReport {
         self.format_with_prepended_header(body, Self::append_stats_header)
     }
 
+    fn format_with_real_stats(&self, body: String) -> String {
+        self.format_with_prepended_header(body, Self::append_real_stats_header)
+    }
+
+    fn format_with_detailed_stats(&self, body: String) -> String {
+        self.format_with_prepended_header(body, Self::append_detailed_stats_header)
+    }
+
     fn append_stats_header(&self, out: &mut String) {
         out.push_str("== Parser error stats ==\n");
         for (code, n) in self.error_stats() {
@@ -478,10 +486,7 @@ impl ParseReport {
     }
 
     pub fn format_real_errors_with_stats(&self) -> String {
-        self.format_with_prepended_header(
-            self.format_real_errors_in_original_order(false),
-            Self::append_real_stats_header,
-        )
+        self.format_with_real_stats(self.format_real_errors_in_original_order(false))
     }
 
     pub fn format_real_errors_compact(&self) -> String {
@@ -489,10 +494,7 @@ impl ParseReport {
     }
 
     pub fn format_real_errors_compact_with_stats(&self) -> String {
-        self.format_with_prepended_header(
-            self.format_real_errors_in_original_order(true),
-            Self::append_real_stats_header,
-        )
+        self.format_with_real_stats(self.format_real_errors_in_original_order(true))
     }
 
     pub fn format_real_errors_compact_sorted(&self) -> String {
@@ -500,10 +502,7 @@ impl ParseReport {
     }
 
     pub fn format_real_errors_compact_sorted_with_stats(&self) -> String {
-        self.format_with_prepended_header(
-            self.format_real_errors_compact_sorted(),
-            Self::append_real_stats_header,
-        )
+        self.format_with_real_stats(self.format_real_errors_compact_sorted())
     }
 
     pub fn format_inserted_errors_sorted_with_stats(&self) -> String {
@@ -550,14 +549,14 @@ impl ParseReport {
     pub fn format_real_errors_sorted(&self, include_stats: bool) -> String {
         let body = self.format_real_errors_sorted_impl(false);
         if include_stats {
-            self.format_with_prepended_header(body, Self::append_real_stats_header)
+            self.format_with_real_stats(body)
         } else {
             body
         }
     }
 
     pub fn format_errors_sorted_detailed_stats(&self) -> String {
-        self.format_with_prepended_header(self.format_errors_sorted(), Self::append_detailed_stats_header)
+        self.format_with_detailed_stats(self.format_errors_sorted())
     }
 
 
@@ -1236,6 +1235,14 @@ impl Parser {
         self.format_with_prepended_header(body, Self::append_stats_header)
     }
 
+    fn format_with_real_stats(&self, body: String) -> String {
+        self.format_with_prepended_header(body, Self::append_real_stats_header)
+    }
+
+    fn format_with_detailed_stats(&self, body: String) -> String {
+        self.format_with_prepended_header(body, Self::append_detailed_stats_header)
+    }
+
     fn append_stats_header(&self, out: &mut String) {
         out.push_str("== Parser error stats ==\n");
         for (code, n) in self.error_stats() {
@@ -1325,7 +1332,7 @@ impl Parser {
     pub fn format_real_errors_sorted(&self, include_stats: bool) -> String {
         let body = self.format_real_errors_sorted_impl(false);
         if include_stats {
-            self.format_with_prepended_header(body, Self::append_real_stats_header)
+            self.format_with_real_stats(body)
         } else {
             body
         }
@@ -1337,10 +1344,7 @@ impl Parser {
     }
 
     pub fn format_real_errors_compact_sorted_with_stats(&self) -> String {
-        self.format_with_prepended_header(
-            self.format_real_errors_compact_sorted(),
-            Self::append_real_stats_header,
-        )
+        self.format_with_real_stats(self.format_real_errors_compact_sorted())
     }
 
     pub fn format_inserted_errors_sorted(&self) -> String {
@@ -1361,10 +1365,7 @@ impl Parser {
 
     /// Like `format_errors_sorted`, but the stats header also reports inserted-token counts per code.
     pub fn format_errors_sorted_detailed_stats(&self) -> String {
-        self.format_with_prepended_header(
-            self.format_sorted_errors_impl(false, true),
-            Self::append_detailed_stats_header,
-        )
+        self.format_with_detailed_stats(self.format_sorted_errors_impl(false, true))
     }
 
     /// Get errors sorted by source position (line/col/idx/code).
@@ -1433,10 +1434,7 @@ impl Parser {
     }
 
     pub fn format_real_errors_with_stats(&self) -> String {
-        self.format_with_prepended_header(
-            self.format_real_errors_in_original_order(false),
-            Self::append_real_stats_header,
-        )
+        self.format_with_real_stats(self.format_real_errors_in_original_order(false))
     }
 
     pub fn format_real_errors_compact(&self) -> String {
@@ -1444,10 +1442,7 @@ impl Parser {
     }
 
     pub fn format_real_errors_compact_with_stats(&self) -> String {
-        self.format_with_prepended_header(
-            self.format_real_errors_in_original_order(true),
-            Self::append_real_stats_header,
-        )
+        self.format_with_real_stats(self.format_real_errors_in_original_order(true))
     }
 
     /// Render errors in a compact format, but sorted by source position.
