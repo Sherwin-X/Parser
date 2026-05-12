@@ -357,7 +357,7 @@ impl ParseReport {
     }
 
     fn format_with_prepended_header(&self, body: String, append_header: fn(&Self, &mut String)) -> String {
-        if self.errors.is_empty() {
+        if self.errors.is_empty() || body.is_empty() {
             return String::new();
         }
 
@@ -1221,7 +1221,7 @@ impl Parser {
     }
 
     fn format_with_prepended_header(&self, body: String, append_header: fn(&Self, &mut String)) -> String {
-        if self.errors.is_empty() {
+        if self.errors.is_empty() || body.is_empty() {
             return String::new();
         }
 
