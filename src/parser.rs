@@ -220,12 +220,19 @@ impl ParseReport {
         self.errors.len()
     }
 
+    fn count_errors_matching<F>(&self, mut pred: F) -> usize
+    where
+        F: FnMut(&ParseError) -> bool,
+    {
+        self.errors.iter().filter(|e| pred(e)).count()
+    }
+
     pub fn inserted_error_count(&self) -> usize {
-        self.errors.iter().filter(|e| e.is_inserted()).count()
+        self.count_errors_matching(|e| e.is_inserted())
     }
 
     pub fn real_error_count(&self) -> usize {
-        self.errors.len().saturating_sub(self.inserted_error_count())
+        self.count_errors_matching(|e| !e.is_inserted())
     }
 
     pub fn error_quality_ratio(&self) -> f64 {
@@ -990,14 +997,21 @@ impl Parser {
         self.errors.len()
     }
 
+    fn count_errors_matching<F>(&self, mut pred: F) -> usize
+    where
+        F: FnMut(&ParseError) -> bool,
+    {
+        self.errors.iter().filter(|e| pred(e)).count()
+    }
+
     /// Count how many errors are inserted-token recoveries.
     pub fn inserted_error_count(&self) -> usize {
-        self.errors.iter().filter(|e| e.is_inserted()).count()
+        self.count_errors_matching(|e| e.is_inserted())
     }
 
     /// Count non-inserted errors (i.e., "real" parse errors).
     pub fn real_error_count(&self) -> usize {
-        self.errors.len().saturating_sub(self.inserted_error_count())
+        self.count_errors_matching(|e| !e.is_inserted())
     }
 
     /// Ratio of real errors to total errors (0.0..=1.0). Higher is "worse" input; lower means more recovered via insertions.
