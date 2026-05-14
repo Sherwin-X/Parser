@@ -2,6 +2,8 @@ use crate::token::{Token, TokenType, Span};
 use std::sync::OnceLock;
 
 const INSERTED_TOKEN_ERROR_CODE: &str = "E1002";
+const DEFAULT_ERROR_TAB_WIDTH: usize = 4;
+const DEFAULT_ERROR_MAX_WIDTH: usize = 140;
 
 
 fn default_max_errors() -> usize {
@@ -244,8 +246,8 @@ impl ParseReport {
 
     fn summary_counts(&self) -> (usize, usize, usize, f64) {
         let total = self.errors.len();
+        let real = self.real_error_count();
         let inserted = self.inserted_error_count();
-        let real = total.saturating_sub(inserted);
         let ratio = self.error_quality_ratio();
         (total, real, inserted, ratio)
     }
@@ -835,7 +837,7 @@ impl ParseError {
     }
 
     pub fn render(&self) -> String {
-        self.render_with(4, 140)
+        self.render_with(DEFAULT_ERROR_TAB_WIDTH, DEFAULT_ERROR_MAX_WIDTH)
     }
     /// Compact single-line representation: CODE line:col message
     pub fn compact(&self) -> String {
@@ -1024,8 +1026,8 @@ impl Parser {
 
     fn summary_counts(&self) -> (usize, usize, usize, f64) {
         let total = self.errors.len();
+        let real = self.real_error_count();
         let inserted = self.inserted_error_count();
-        let real = total.saturating_sub(inserted);
         let ratio = self.error_quality_ratio();
         (total, real, inserted, ratio)
     }
