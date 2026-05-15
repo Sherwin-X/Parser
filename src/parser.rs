@@ -290,6 +290,12 @@ impl ParseReport {
         self.sorted_errors_matching(|_| true)
     }
 
+    pub fn for_each_error_sorted<F: FnMut(&ParseError)>(&self, mut f: F) {
+        for e in self.sorted_errors_matching(|_| true) {
+            f(e);
+        }
+    }
+
     fn sorted_errors_by_kind(&self, inserted: bool) -> Vec<&ParseError> {
         self.sorted_errors_matching(|e| e.is_inserted() == inserted)
     }
