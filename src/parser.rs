@@ -277,12 +277,24 @@ impl ParseReport {
         }
     }
 
+    fn sorted_error_indices(&self) -> Vec<usize> {
+        let mut idxs: Vec<usize> = (0..self.errors.len()).collect();
+        idxs.sort_by_key(|&i| self.errors[i].sort_key());
+        idxs
+    }
+
     fn sorted_errors_matching<F>(&self, mut pred: F) -> Vec<&ParseError>
     where
         F: FnMut(&ParseError) -> bool,
     {
-        let mut v: Vec<&ParseError> = self.errors.iter().filter(|e| pred(e)).collect();
-        v.sort_by_key(|e| e.sort_key());
+        let idxs = self.sorted_error_indices();
+        let mut v = Vec::new();
+        for i in idxs {
+            let e = &self.errors[i];
+            if pred(e) {
+                v.push(e);
+            }
+        }
         v
     }
 
@@ -291,8 +303,8 @@ impl ParseReport {
     }
 
     pub fn for_each_error_sorted<F: FnMut(&ParseError)>(&self, mut f: F) {
-        for e in self.sorted_errors_matching(|_| true) {
-            f(e);
+        for i in self.sorted_error_indices() {
+            f(&self.errors[i]);
         }
     }
 
@@ -304,20 +316,27 @@ impl ParseReport {
     where
         F: FnMut(&ParseError) -> bool,
     {
-        self.errors
-            .iter()
-            .filter(|e| pred(e))
-            .min_by_key(|e| e.sort_key())
+        for i in self.sorted_error_indices() {
+            let e = &self.errors[i];
+            if pred(e) {
+                return Some(e);
+            }
+        }
+        None
     }
 
     fn last_error_matching<F>(&self, mut pred: F) -> Option<&ParseError>
     where
         F: FnMut(&ParseError) -> bool,
     {
-        self.errors
-            .iter()
-            .filter(|e| pred(e))
-            .max_by_key(|e| e.sort_key())
+        let idxs = self.sorted_error_indices();
+        for &i in idxs.iter().rev() {
+            let e = &self.errors[i];
+            if pred(e) {
+                return Some(e);
+            }
+        }
+        None
     }
 
     fn has_error_matching<F>(&self, pred: F) -> bool
