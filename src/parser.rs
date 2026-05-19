@@ -4,6 +4,7 @@ use std::sync::OnceLock;
 const INSERTED_TOKEN_ERROR_CODE: &str = "E1002";
 const DEFAULT_ERROR_TAB_WIDTH: usize = 4;
 const DEFAULT_ERROR_MAX_WIDTH: usize = 140;
+const MAX_TOKEN_DISPLAY_LEN: usize = 40;
 
 
 fn default_max_errors() -> usize {
@@ -938,6 +939,23 @@ enum InfixKind {
 }
 
 impl Parser {
+    fn current_token_description(&self) -> String {
+        if self.at_end() {
+            return "EOF".to_string();
+        }
+
+        let t = &self.tokens[self.i];
+        let mut s = t.text().to_string();
+        s = s.replace('\n', "\\n")
+            .replace('\r', "\\r")
+            .replace('\t', "\\t");
+        if s.len() > MAX_TOKEN_DISPLAY_LEN {
+            s.truncate(MAX_TOKEN_DISPLAY_LEN);
+            s.push('…');
+        }
+        format!("{:?} '{}'", t.kind(), s)
+    }
+
 
     /// Override the maximum number of parser errors before aborting further parsing.
     /// Useful for test harnesses or batch runs.
@@ -1699,20 +1717,7 @@ impl Parser {
 
     fn err_expect(&mut self, expected: &str) {
         let span = self.cur_span();
-        let got = if self.at_end() {
-            "EOF".to_string()
-        } else {
-            let t = &self.tokens[self.i];
-            let mut s = t.text().to_string();
-            s = s.replace('\n', "\\n")
-                .replace('\r', "\\r")
-                .replace('\t', "\\t");
-            if s.len() > 40 {
-                s.truncate(40);
-                s.push('…');
-            }
-            format!("{:?} '{}'", t.kind(), s)
-        };
+        let got = self.current_token_description();
         self.err_push("E1001", format!("expected {}, found {}", expected, got), span);
         self.sync();
     }
@@ -1720,20 +1725,7 @@ impl Parser {
     fn err_expect_inserted(&mut self, expected: &str) {
         let mut span = self.cur_span();
         span.len = 0;
-        let got = if self.at_end() {
-            "EOF".to_string()
-        } else {
-            let t = &self.tokens[self.i];
-            let mut s = t.text().to_string();
-            s = s.replace('\n', "\\n")
-                .replace('\r', "\\r")
-                .replace('\t', "\\t");
-            if s.len() > 40 {
-                s.truncate(40);
-                s.push('…');
-            }
-            format!("{:?} '{}'", t.kind(), s)
-        };
+        let got = self.current_token_description();
         self.err_push_help(
             INSERTED_TOKEN_ERROR_CODE,
             format!("expected {} (inserted), found {}", expected, got),
