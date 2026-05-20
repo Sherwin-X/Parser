@@ -359,19 +359,19 @@ impl ParseReport {
         }
     }
 
-    fn append_sorted_errors(out: &mut String, errors: &[&ParseError], compact: bool) {
-        for e in errors {
-            Self::append_error(out, e, compact);
-        }
-    }
 
 
-    fn append_sorted_errors_matching<F>(&self, out: &mut String, compact: bool, pred: F)
+    fn append_sorted_errors_matching<F>(&self, out: &mut String, compact: bool, mut pred: F)
     where
         F: FnMut(&ParseError) -> bool,
     {
-        let errors = self.sorted_errors_matching(pred);
-        Self::append_sorted_errors(out, &errors, compact);
+        for i in self.sorted_error_indices() {
+            let e = &self.errors[i];
+            if !pred(e) {
+                continue;
+            }
+            Self::append_error(out, e, compact);
+        }
     }
 
     fn format_sorted_errors_matching<F>(&self, compact: bool, pred: F) -> String
