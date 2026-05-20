@@ -410,6 +410,10 @@ impl ParseReport {
         self.format_with_prepended_header(body, Self::append_real_stats_header)
     }
 
+    fn format_with_inserted_stats(&self, body: String) -> String {
+        self.format_with_prepended_header(body, Self::append_inserted_stats_header)
+    }
+
     fn format_with_detailed_stats(&self, body: String) -> String {
         self.format_with_prepended_header(body, Self::append_detailed_stats_header)
     }
@@ -430,6 +434,17 @@ impl ParseReport {
                 continue;
             }
             out.push_str(&format!("{code}: {real}\n"));
+        }
+        out.push('\n');
+    }
+
+    fn append_inserted_stats_header(&self, out: &mut String) {
+        out.push_str("== Parser error stats (inserted only) ==\n");
+        for (code, (_total, inserted)) in self.error_stats_detailed() {
+            if inserted == 0 {
+                continue;
+            }
+            out.push_str(&format!("{code}: {inserted}\n"));
         }
         out.push('\n');
     }
@@ -541,11 +556,11 @@ impl ParseReport {
     }
 
     pub fn format_inserted_errors_sorted_with_stats(&self) -> String {
-        self.format_with_stats(self.format_inserted_errors_sorted_impl(false))
+        self.format_with_inserted_stats(self.format_inserted_errors_sorted_impl(false))
     }
 
     pub fn format_inserted_errors_compact_sorted_with_stats(&self) -> String {
-        self.format_with_stats(self.format_inserted_errors_sorted_impl(true))
+        self.format_with_inserted_stats(self.format_inserted_errors_sorted_impl(true))
     }
 
     pub fn format_inserted_errors_compact(&self) -> String {
@@ -691,11 +706,11 @@ impl ParseReport {
     }
 
     pub fn format_inserted_errors_compact_with_stats(&self) -> String {
-        self.format_with_stats(self.format_inserted_errors_in_original_order(true))
+        self.format_with_inserted_stats(self.format_inserted_errors_in_original_order(true))
     }
 
     pub fn format_inserted_errors_with_stats(&self) -> String {
-        self.format_with_stats(self.format_inserted_errors_in_original_order(false))
+        self.format_with_inserted_stats(self.format_inserted_errors_in_original_order(false))
     }
 
 
@@ -1298,6 +1313,10 @@ impl Parser {
         self.format_with_prepended_header(body, Self::append_real_stats_header)
     }
 
+    fn format_with_inserted_stats(&self, body: String) -> String {
+        self.format_with_prepended_header(body, Self::append_inserted_stats_header)
+    }
+
     fn format_with_detailed_stats(&self, body: String) -> String {
         self.format_with_prepended_header(body, Self::append_detailed_stats_header)
     }
@@ -1318,6 +1337,17 @@ impl Parser {
                 continue;
             }
             out.push_str(&format!("{code}: {real}\n"));
+        }
+        out.push('\n');
+    }
+
+    fn append_inserted_stats_header(&self, out: &mut String) {
+        out.push_str("== Parser error stats (inserted only) ==\n");
+        for (code, (_total, inserted)) in self.error_stats_detailed() {
+            if inserted == 0 {
+                continue;
+            }
+            out.push_str(&format!("{code}: {inserted}\n"));
         }
         out.push('\n');
     }
@@ -1514,19 +1544,19 @@ impl Parser {
     }
 
     pub fn format_inserted_errors_sorted_with_stats(&self) -> String {
-        self.format_with_stats(self.format_inserted_errors_sorted_impl(false))
+        self.format_with_inserted_stats(self.format_inserted_errors_sorted_impl(false))
     }
 
     pub fn format_inserted_errors_compact_sorted_with_stats(&self) -> String {
-        self.format_with_stats(self.format_inserted_errors_sorted_impl(true))
+        self.format_with_inserted_stats(self.format_inserted_errors_sorted_impl(true))
     }
 
     pub fn format_inserted_errors_compact_with_stats(&self) -> String {
-        self.format_with_stats(self.format_inserted_errors_in_original_order(true))
+        self.format_with_inserted_stats(self.format_inserted_errors_in_original_order(true))
     }
 
     pub fn format_inserted_errors_with_stats(&self) -> String {
-        self.format_with_stats(self.format_inserted_errors_in_original_order(false))
+        self.format_with_inserted_stats(self.format_inserted_errors_in_original_order(false))
     }
 
 
