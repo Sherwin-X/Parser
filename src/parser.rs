@@ -954,20 +954,29 @@ enum InfixKind {
 }
 
 impl Parser {
+    fn escape_token_text(text: &str) -> String {
+        text.replace('\n', "\\n")
+            .replace('\r', "\\r")
+            .replace('\t', "\\t")
+    }
+
+    fn truncate_token_display(mut text: String) -> String {
+        if text.chars().count() <= MAX_TOKEN_DISPLAY_LEN {
+            return text;
+        }
+
+        text = text.chars().take(MAX_TOKEN_DISPLAY_LEN).collect();
+        text.push('…');
+        text
+    }
+
     fn current_token_description(&self) -> String {
         if self.at_end() {
             return "EOF".to_string();
         }
 
         let t = &self.tokens[self.i];
-        let mut s = t.text().to_string();
-        s = s.replace('\n', "\\n")
-            .replace('\r', "\\r")
-            .replace('\t', "\\t");
-        if s.len() > MAX_TOKEN_DISPLAY_LEN {
-            s.truncate(MAX_TOKEN_DISPLAY_LEN);
-            s.push('…');
-        }
+        let s = Self::truncate_token_display(Self::escape_token_text(t.text()));
         format!("{:?} '{}'", t.kind(), s)
     }
 
