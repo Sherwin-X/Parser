@@ -406,8 +406,24 @@ impl ParseReport {
         self.format_with_prepended_header(body, Self::append_stats_header)
     }
 
+    fn format_with_optional_stats(&self, body: String, include_stats: bool) -> String {
+        if include_stats {
+            self.format_with_stats(body)
+        } else {
+            body
+        }
+    }
+
     fn format_with_real_stats(&self, body: String) -> String {
         self.format_with_prepended_header(body, Self::append_real_stats_header)
+    }
+
+    fn format_with_optional_real_stats(&self, body: String, include_stats: bool) -> String {
+        if include_stats {
+            self.format_with_real_stats(body)
+        } else {
+            body
+        }
     }
 
     fn format_with_inserted_stats(&self, body: String) -> String {
@@ -597,12 +613,7 @@ impl ParseReport {
     }
 
     pub fn format_real_errors_sorted(&self, include_stats: bool) -> String {
-        let body = self.format_real_errors_sorted_impl(false);
-        if include_stats {
-            self.format_with_real_stats(body)
-        } else {
-            body
-        }
+        self.format_with_optional_real_stats(self.format_real_errors_sorted_impl(false), include_stats)
     }
 
     pub fn format_errors_sorted_detailed_stats(&self) -> String {
@@ -1318,8 +1329,24 @@ impl Parser {
         self.format_with_prepended_header(body, Self::append_stats_header)
     }
 
+    fn format_with_optional_stats(&self, body: String, include_stats: bool) -> String {
+        if include_stats {
+            self.format_with_stats(body)
+        } else {
+            body
+        }
+    }
+
     fn format_with_real_stats(&self, body: String) -> String {
         self.format_with_prepended_header(body, Self::append_real_stats_header)
+    }
+
+    fn format_with_optional_real_stats(&self, body: String, include_stats: bool) -> String {
+        if include_stats {
+            self.format_with_real_stats(body)
+        } else {
+            body
+        }
     }
 
     fn format_with_inserted_stats(&self, body: String) -> String {
@@ -1407,33 +1434,18 @@ impl Parser {
     }
 
     pub fn format_errors(&self, include_stats: bool) -> String {
-        let body = self.format_errors_in_original_order(false);
-        if include_stats {
-            self.format_with_stats(body)
-        } else {
-            body
-        }
+        self.format_with_optional_stats(self.format_errors_in_original_order(false), include_stats)
     }
 
 
     /// Render full multi-line errors, sorted by source position (line/col/idx/code).
     pub fn format_errors_sorted(&self, include_stats: bool) -> String {
-        let body = self.format_sorted_errors_impl(false, true);
-        if include_stats {
-            self.format_with_stats(body)
-        } else {
-            body
-        }
+        self.format_with_optional_stats(self.format_sorted_errors_impl(false, true), include_stats)
     }
 
     /// Render only non-inserted ("real") errors in stable source order.
     pub fn format_real_errors_sorted(&self, include_stats: bool) -> String {
-        let body = self.format_real_errors_sorted_impl(false);
-        if include_stats {
-            self.format_with_real_stats(body)
-        } else {
-            body
-        }
+        self.format_with_optional_real_stats(self.format_real_errors_sorted_impl(false), include_stats)
     }
 
     /// Render only non-inserted ("real") errors in a compact, one-line-per-error format.
