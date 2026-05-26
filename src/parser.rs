@@ -5,6 +5,10 @@ const INSERTED_TOKEN_ERROR_CODE: &str = "E1002";
 const DEFAULT_ERROR_TAB_WIDTH: usize = 4;
 const DEFAULT_ERROR_MAX_WIDTH: usize = 140;
 const MAX_TOKEN_DISPLAY_LEN: usize = 40;
+const STATS_HEADER: &str = "== Parser error stats ==\n";
+const REAL_STATS_HEADER: &str = "== Parser error stats (real only) ==\n";
+const INSERTED_STATS_HEADER: &str = "== Parser error stats (inserted only) ==\n";
+const DETAILED_STATS_HEADER: &str = "== Parser error stats (total/inserted) ==\n";
 
 
 fn default_max_errors() -> usize {
@@ -19,7 +23,7 @@ fn default_max_errors() -> usize {
 }
 
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::fmt;
@@ -435,7 +439,7 @@ impl ParseReport {
     }
 
     fn append_stats_header(&self, out: &mut String) {
-        out.push_str("== Parser error stats ==\n");
+        out.push_str(STATS_HEADER);
         for (code, n) in self.error_stats() {
             out.push_str(&format!("{code}: {n}\n"));
         }
@@ -443,7 +447,7 @@ impl ParseReport {
     }
 
     fn append_real_stats_header(&self, out: &mut String) {
-        out.push_str("== Parser error stats (real only) ==\n");
+        out.push_str(REAL_STATS_HEADER);
         for (code, real) in self.real_error_stats() {
             out.push_str(&format!("{code}: {real}\n"));
         }
@@ -451,7 +455,7 @@ impl ParseReport {
     }
 
     fn append_inserted_stats_header(&self, out: &mut String) {
-        out.push_str("== Parser error stats (inserted only) ==\n");
+        out.push_str(INSERTED_STATS_HEADER);
         for (code, inserted) in self.inserted_error_stats() {
             out.push_str(&format!("{code}: {inserted}\n"));
         }
@@ -459,7 +463,7 @@ impl ParseReport {
     }
 
     fn append_detailed_stats_header(&self, out: &mut String) {
-        out.push_str("== Parser error stats (total/inserted) ==\n");
+        out.push_str(DETAILED_STATS_HEADER);
         for (code, (total, inserted)) in self.error_stats_detailed() {
             out.push_str(&format!("{code}: {total}/{inserted}\n"));
         }
