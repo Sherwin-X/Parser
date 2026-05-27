@@ -1355,7 +1355,7 @@ impl Parser {
     }
 
     fn append_stats_header(&self, out: &mut String) {
-        out.push_str("== Parser error stats ==\n");
+        out.push_str(STATS_HEADER);
         for (code, n) in self.error_stats() {
             out.push_str(&format!("{code}: {n}\n"));
         }
@@ -1363,7 +1363,7 @@ impl Parser {
     }
 
     fn append_real_stats_header(&self, out: &mut String) {
-        out.push_str("== Parser error stats (real only) ==\n");
+        out.push_str(REAL_STATS_HEADER);
         for (code, real) in self.real_error_stats() {
             out.push_str(&format!("{code}: {real}\n"));
         }
@@ -1371,7 +1371,7 @@ impl Parser {
     }
 
     fn append_inserted_stats_header(&self, out: &mut String) {
-        out.push_str("== Parser error stats (inserted only) ==\n");
+        out.push_str(INSERTED_STATS_HEADER);
         for (code, inserted) in self.inserted_error_stats() {
             out.push_str(&format!("{code}: {inserted}\n"));
         }
@@ -1379,7 +1379,7 @@ impl Parser {
     }
 
     fn append_detailed_stats_header(&self, out: &mut String) {
-        out.push_str("== Parser error stats (total/inserted) ==\n");
+        out.push_str(DETAILED_STATS_HEADER);
         for (code, (total, inserted)) in self.error_stats_detailed() {
             out.push_str(&format!("{code}: {total}/{inserted}\n"));
         }
