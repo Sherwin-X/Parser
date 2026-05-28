@@ -410,13 +410,6 @@ impl ParseReport {
         self.format_with_prepended_header(body, Self::append_stats_header)
     }
 
-    fn format_with_optional_stats(&self, body: String, include_stats: bool) -> String {
-        if include_stats {
-            self.format_with_stats(body)
-        } else {
-            body
-        }
-    }
 
     fn format_with_real_stats(&self, body: String) -> String {
         self.format_with_prepended_header(body, Self::append_real_stats_header)
