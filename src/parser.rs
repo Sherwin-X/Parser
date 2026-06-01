@@ -5,6 +5,8 @@ const INSERTED_TOKEN_ERROR_CODE: &str = "E1002";
 const DEFAULT_ERROR_TAB_WIDTH: usize = 4;
 const DEFAULT_ERROR_MAX_WIDTH: usize = 140;
 const MAX_TOKEN_DISPLAY_LEN: usize = 40;
+const NO_PARSER_ERRORS: &str = "no parser errors";
+const UNKNOWN_ERROR_SUMMARY: &str = "<unknown>";
 const STATS_HEADER: &str = "== Parser error stats ==\n";
 const REAL_STATS_HEADER: &str = "== Parser error stats (real only) ==\n";
 const INSERTED_STATS_HEADER: &str = "== Parser error stats (inserted only) ==\n";
@@ -260,12 +262,12 @@ impl ParseReport {
     fn first_error_compact(&self) -> String {
         self.first_error()
             .map(|e| e.compact())
-            .unwrap_or_else(|| "<unknown>".to_string())
+            .unwrap_or_else(|| UNKNOWN_ERROR_SUMMARY.to_string())
     }
 
     pub fn summary(&self) -> String {
         if self.errors.is_empty() {
-            return "no parser errors".to_string();
+            return NO_PARSER_ERRORS.to_string();
         }
 
         let (total, real, inserted, ratio) = self.summary_counts();
@@ -278,7 +280,7 @@ impl ParseReport {
             ParseOutcome::RecoveredOnly => {
                 format!("{total} errors (real={real}, inserted={inserted}, ratio={ratio:.2}) (recovered): {first}")
             }
-            ParseOutcome::Clean => "no parser errors".to_string(),
+            ParseOutcome::Clean => NO_PARSER_ERRORS.to_string(),
         }
     }
 
@@ -1103,7 +1105,7 @@ impl Parser {
     fn first_error_compact(&self) -> String {
         self.first_error()
             .map(|e| e.compact())
-            .unwrap_or_else(|| "<unknown>".to_string())
+            .unwrap_or_else(|| UNKNOWN_ERROR_SUMMARY.to_string())
     }
 
     /// Whether parsing aborted due to too many errors.
@@ -1141,7 +1143,7 @@ impl Parser {
     /// A short human-readable summary for logs: error count, aborted flag, and the first error (if any).
     pub fn summary(&self) -> String {
         if self.errors.is_empty() {
-            return "no parser errors".to_string();
+            return NO_PARSER_ERRORS.to_string();
         }
 
         let (total, real, inserted, ratio) = self.summary_counts();
