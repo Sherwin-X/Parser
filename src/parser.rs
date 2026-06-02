@@ -1675,6 +1675,37 @@ impl Parser {
             .to_string()
     }
 
+    fn prev_line_context(&self, span: Span) -> Option<(usize, String)> {
+        if span.line > 1 {
+            Some((span.line - 1, self.line_text_by_no(span.line - 1)))
+        } else {
+            None
+        }
+    }
+
+    fn next_line_context(&self, span: Span) -> Option<(usize, String)> {
+        Some((span.line + 1, self.line_text_by_no(span.line + 1)))
+            .filter(|(_, s)| !s.is_empty())
+    }
+
+    fn make_parse_error(
+        &self,
+        code: &'static str,
+        message: String,
+        span: Span,
+        help: Option<String>,
+    ) -> ParseError {
+        ParseError {
+            code,
+            message,
+            span,
+            line_text: self.line_text_at(span),
+            prev_line: self.prev_line_context(span),
+            next_line: self.next_line_context(span),
+            help,
+        }
+    }
+
     
 
     fn push_error(&mut self, code: &'static str, message: String, span: Span, help: Option<String>) {
@@ -1691,50 +1722,25 @@ impl Parser {
         if self.errors.len() >= self.max_errors_limit.saturating_sub(1) {
             self.aborted = true;
 
-            let abort_span = span;
-            let abort_line_text = self.line_text_at(abort_span);
-
-            self.errors.push(ParseError {
-                code: "E9999",
-                message: format!(
+            self.errors.push(self.make_parse_error(
+                "E9999",
+                format!(
                     "too many errors (limit {}), aborting parse",
                     self.max_errors_limit
                 ),
-                span: abort_span,
-                line_text: abort_line_text,
-                prev_line: if abort_span.line > 1 {
-                    Some((abort_span.line - 1, self.line_text_by_no(abort_span.line - 1)))
-                } else {
-                    None
-                },
-                next_line: Some((abort_span.line + 1, self.line_text_by_no(abort_span.line + 1)))
-                    .filter(|(_, s)| !s.is_empty()),
-                help: Some(
+                span,
+                Some(
                     "Set PARSER_MAX_ERRORS or call Parser::set_max_errors(...) to adjust the limit."
                         .into(),
                 ),
-            });
+            ));
             *self.sorted_errors_cache.borrow_mut() = None;
 
             self.i = self.tokens.len();
             return;
         }
 
-        let line_text = self.line_text_at(span);
-        self.errors.push(ParseError {
-            code,
-            message,
-            span,
-            line_text,
-            prev_line: if span.line > 1 {
-                Some((span.line - 1, self.line_text_by_no(span.line - 1)))
-            } else {
-                None
-            },
-            next_line: Some((span.line + 1, self.line_text_by_no(span.line + 1)))
-                .filter(|(_, s)| !s.is_empty()),
-            help,
-        });
+        self.errors.push(self.make_parse_error(code, message, span, help));
         *self.sorted_errors_cache.borrow_mut() = None;
     }
 
