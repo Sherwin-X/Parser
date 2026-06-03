@@ -1,7 +1,9 @@
 use crate::token::{Token, TokenType, Span};
 use std::sync::OnceLock;
 
+const EXPECTED_TOKEN_ERROR_CODE: &str = "E1001";
 const INSERTED_TOKEN_ERROR_CODE: &str = "E1002";
+const TOO_MANY_ERRORS_ERROR_CODE: &str = "E9999";
 const DEFAULT_ERROR_TAB_WIDTH: usize = 4;
 const DEFAULT_ERROR_MAX_WIDTH: usize = 140;
 const MAX_TOKEN_DISPLAY_LEN: usize = 40;
@@ -1723,7 +1725,7 @@ impl Parser {
             self.aborted = true;
 
             self.errors.push(self.make_parse_error(
-                "E9999",
+                TOO_MANY_ERRORS_ERROR_CODE,
                 format!(
                     "too many errors (limit {}), aborting parse",
                     self.max_errors_limit
@@ -1758,7 +1760,11 @@ impl Parser {
     fn err_expect(&mut self, expected: &str) {
         let span = self.cur_span();
         let got = self.current_token_description();
-        self.err_push("E1001", format!("expected {}, found {}", expected, got), span);
+        self.err_push(
+            EXPECTED_TOKEN_ERROR_CODE,
+            format!("expected {}, found {}", expected, got),
+            span,
+        );
         self.sync();
     }
 
