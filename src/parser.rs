@@ -9,6 +9,9 @@ const DEFAULT_ERROR_MAX_WIDTH: usize = 140;
 const MAX_TOKEN_DISPLAY_LEN: usize = 40;
 const NO_PARSER_ERRORS: &str = "no parser errors";
 const UNKNOWN_ERROR_SUMMARY: &str = "<unknown>";
+const EOF_TOKEN_DESCRIPTION: &str = "EOF";
+const TOO_MANY_ERRORS_HELP: &str =
+    "Set PARSER_MAX_ERRORS or call Parser::set_max_errors(...) to adjust the limit.";
 const STATS_HEADER: &str = "== Parser error stats ==\n";
 const REAL_STATS_HEADER: &str = "== Parser error stats (real only) ==\n";
 const INSERTED_STATS_HEADER: &str = "== Parser error stats (inserted only) ==\n";
@@ -977,7 +980,7 @@ impl Parser {
 
     fn current_token_description(&self) -> String {
         if self.at_end() {
-            return "EOF".to_string();
+            return EOF_TOKEN_DESCRIPTION.to_string();
         }
 
         let t = &self.tokens[self.i];
@@ -1731,10 +1734,7 @@ impl Parser {
                     self.max_errors_limit
                 ),
                 span,
-                Some(
-                    "Set PARSER_MAX_ERRORS or call Parser::set_max_errors(...) to adjust the limit."
-                        .into(),
-                ),
+                Some(TOO_MANY_ERRORS_HELP.into()),
             ));
             *self.sorted_errors_cache.borrow_mut() = None;
 
