@@ -1,4 +1,8 @@
-use crate::token::{Token, TokenType, Span};
+use crate::token::{Span, Token, TokenType};
+use std::cell::RefCell;
+use std::collections::{BTreeMap, HashSet};
+use std::fmt;
+use std::rc::Rc;
 use std::sync::OnceLock;
 
 const EXPECTED_TOKEN_ERROR_CODE: &str = "E1001";
@@ -30,10 +34,6 @@ fn default_max_errors() -> usize {
 }
 
 
-use std::collections::{BTreeMap, HashSet};
-use std::cell::RefCell;
-use std::rc::Rc;
-use std::fmt;
 
 /* ===================== AST ===================== */
 
