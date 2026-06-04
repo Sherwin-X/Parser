@@ -8,6 +8,9 @@ use std::sync::OnceLock;
 const EXPECTED_TOKEN_ERROR_CODE: &str = "E1001";
 const INSERTED_TOKEN_ERROR_CODE: &str = "E1002";
 const TOO_MANY_ERRORS_ERROR_CODE: &str = "E9999";
+const DEFAULT_MAX_ERRORS: usize = 50;
+const MIN_MAX_ERRORS: usize = 1;
+const MAX_MAX_ERRORS: usize = 10_000;
 const DEFAULT_ERROR_TAB_WIDTH: usize = 4;
 const DEFAULT_ERROR_MAX_WIDTH: usize = 140;
 const MAX_TOKEN_DISPLAY_LEN: usize = 40;
@@ -28,8 +31,8 @@ fn default_max_errors() -> usize {
         std::env::var("PARSER_MAX_ERRORS")
             .ok()
             .and_then(|v| v.parse::<usize>().ok())
-            .filter(|&n| n >= 1 && n <= 10_000)
-            .unwrap_or(50)
+            .filter(|&n| (MIN_MAX_ERRORS..=MAX_MAX_ERRORS).contains(&n))
+            .unwrap_or(DEFAULT_MAX_ERRORS)
     })
 }
 
@@ -992,7 +995,7 @@ impl Parser {
     /// Override the maximum number of parser errors before aborting further parsing.
     /// Useful for test harnesses or batch runs.
     pub fn set_max_errors(&mut self, limit: usize) {
-        self.max_errors_limit = limit.max(1);
+        self.max_errors_limit = limit.clamp(MIN_MAX_ERRORS, MAX_MAX_ERRORS);
     }
 
     /// Construct a parser with a custom maximum error limit (default is read from PARSER_MAX_ERRORS or 50).
