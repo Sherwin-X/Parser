@@ -7,6 +7,7 @@ use std::sync::OnceLock;
 
 const EXPECTED_TOKEN_ERROR_CODE: &str = "E1001";
 const INSERTED_TOKEN_ERROR_CODE: &str = "E1002";
+const NO_PROGRESS_ERROR_CODE: &str = "E9000";
 const TOO_MANY_ERRORS_ERROR_CODE: &str = "E9999";
 const DEFAULT_MAX_ERRORS: usize = 50;
 const MIN_MAX_ERRORS: usize = 1;
@@ -17,6 +18,8 @@ const MAX_TOKEN_DISPLAY_LEN: usize = 40;
 const NO_PARSER_ERRORS: &str = "no parser errors";
 const UNKNOWN_ERROR_SUMMARY: &str = "<unknown>";
 const EOF_TOKEN_DESCRIPTION: &str = "EOF";
+const NO_PROGRESS_ERROR_MESSAGE: &str =
+    "parser made no progress at top level; skipping tokens to recover";
 const TOO_MANY_ERRORS_HELP: &str =
     "Set PARSER_MAX_ERRORS or call Parser::set_max_errors(...) to adjust the limit.";
 const STATS_HEADER: &str = "== Parser error stats ==\n";
@@ -2394,8 +2397,8 @@ impl Parser {
             if self.i == start_i && !self.at_end() {
                 let sp = self.cur_span();
                 self.err_push(
-                    "E9000",
-                    "parser made no progress at top level; skipping tokens to recover".to_string(),
+                    NO_PROGRESS_ERROR_CODE,
+                    NO_PROGRESS_ERROR_MESSAGE.to_string(),
                     sp,
                 );
                 self.sync_top_level();
