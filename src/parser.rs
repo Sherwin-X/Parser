@@ -994,6 +994,10 @@ impl Parser {
         format!("{:?} '{}'", t.kind(), s)
     }
 
+    fn invalidate_sorted_errors_cache(&self) {
+        *self.sorted_errors_cache.borrow_mut() = None;
+    }
+
 
     /// Override the maximum number of parser errors before aborting further parsing.
     /// Useful for test harnesses or batch runs.
@@ -1026,7 +1030,7 @@ impl Parser {
 
     /// Take ownership of accumulated errors (leaves the parser with an empty error list).
     pub fn take_errors(&mut self) -> Vec<ParseError> {
-        *self.sorted_errors_cache.borrow_mut() = None;
+        self.invalidate_sorted_errors_cache();
         std::mem::take(&mut self.errors)
     }
 
@@ -1036,7 +1040,7 @@ impl Parser {
         self.errors.clear();
         self.seen_errors.clear();
         self.aborted = false;
-        *self.sorted_errors_cache.borrow_mut() = None;
+        self.invalidate_sorted_errors_cache();
     }
 
     /// Convenience helper: parse all items and return (items, errors, aborted).
@@ -1742,14 +1746,14 @@ impl Parser {
                 span,
                 Some(TOO_MANY_ERRORS_HELP.into()),
             ));
-            *self.sorted_errors_cache.borrow_mut() = None;
+            self.invalidate_sorted_errors_cache();
 
             self.i = self.tokens.len();
             return;
         }
 
         self.errors.push(self.make_parse_error(code, message, span, help));
-        *self.sorted_errors_cache.borrow_mut() = None;
+        self.invalidate_sorted_errors_cache();
     }
 
     fn err_push(&mut self, code: &'static str, message: String, span: Span) {
