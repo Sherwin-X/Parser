@@ -1721,6 +1721,21 @@ impl Parser {
         }
     }
 
+    fn abort_with_too_many_errors(&mut self, span: Span) {
+        self.aborted = true;
+        self.errors.push(self.make_parse_error(
+            TOO_MANY_ERRORS_ERROR_CODE,
+            format!(
+                "too many errors (limit {}), aborting parse",
+                self.max_errors_limit
+            ),
+            span,
+            Some(TOO_MANY_ERRORS_HELP.into()),
+        ));
+        self.invalidate_sorted_errors_cache();
+        self.i = self.tokens.len();
+    }
+
     
 
     fn push_error(&mut self, code: &'static str, message: String, span: Span, help: Option<String>) {
@@ -1735,20 +1750,7 @@ impl Parser {
         self.seen_errors.insert(key);
 
         if self.errors.len() >= self.max_errors_limit.saturating_sub(1) {
-            self.aborted = true;
-
-            self.errors.push(self.make_parse_error(
-                TOO_MANY_ERRORS_ERROR_CODE,
-                format!(
-                    "too many errors (limit {}), aborting parse",
-                    self.max_errors_limit
-                ),
-                span,
-                Some(TOO_MANY_ERRORS_HELP.into()),
-            ));
-            self.invalidate_sorted_errors_cache();
-
-            self.i = self.tokens.len();
+            self.abort_with_too_many_errors(span);
             return;
         }
 
