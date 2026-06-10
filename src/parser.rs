@@ -9,6 +9,7 @@ const EXPECTED_TOKEN_ERROR_CODE: &str = "E1001";
 const INSERTED_TOKEN_ERROR_CODE: &str = "E1002";
 const NO_PROGRESS_ERROR_CODE: &str = "E9000";
 const TOO_MANY_ERRORS_ERROR_CODE: &str = "E9999";
+const PARSER_MAX_ERRORS_ENV: &str = "PARSER_MAX_ERRORS";
 const DEFAULT_MAX_ERRORS: usize = 50;
 const MIN_MAX_ERRORS: usize = 1;
 const MAX_MAX_ERRORS: usize = 10_000;
@@ -31,7 +32,7 @@ const DETAILED_STATS_HEADER: &str = "== Parser error stats (total/inserted) ==\n
 fn default_max_errors() -> usize {
     static MAX: OnceLock<usize> = OnceLock::new();
     *MAX.get_or_init(|| {
-        std::env::var("PARSER_MAX_ERRORS")
+        std::env::var(PARSER_MAX_ERRORS_ENV)
             .ok()
             .and_then(|v| v.parse::<usize>().ok())
             .filter(|&n| (MIN_MAX_ERRORS..=MAX_MAX_ERRORS).contains(&n))
