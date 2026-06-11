@@ -1722,14 +1722,18 @@ impl Parser {
         }
     }
 
+    fn too_many_errors_message(&self) -> String {
+        format!(
+            "too many errors (limit {}), aborting parse",
+            self.max_errors_limit
+        )
+    }
+
     fn abort_with_too_many_errors(&mut self, span: Span) {
         self.aborted = true;
         self.errors.push(self.make_parse_error(
             TOO_MANY_ERRORS_ERROR_CODE,
-            format!(
-                "too many errors (limit {}), aborting parse",
-                self.max_errors_limit
-            ),
+            self.too_many_errors_message(),
             span,
             Some(TOO_MANY_ERRORS_HELP.into()),
         ));
