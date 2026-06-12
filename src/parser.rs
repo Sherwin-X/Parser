@@ -206,6 +206,9 @@ pub enum ParseOutcome {
     Failed,
 }
 
+type ErrorStats = BTreeMap<&'static str, usize>;
+type DetailedErrorStats = BTreeMap<&'static str, (usize, usize)>;
+
 impl fmt::Display for ParseOutcome {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -592,9 +595,9 @@ impl ParseReport {
     }
 
 
-    fn error_stats_impl(&self) -> BTreeMap<&'static str, (usize, usize)> {
-        let mut map: BTreeMap<&'static str, (usize, usize)> =
-            BTreeMap::new();
+    fn error_stats_impl(&self) -> DetailedErrorStats {
+        let mut map: DetailedErrorStats =
+            DetailedErrorStats::new();
         for e in &self.errors {
             let entry = map.entry(e.code).or_insert((0, 0));
             entry.0 += 1;
@@ -605,14 +608,14 @@ impl ParseReport {
         map
     }
 
-    pub fn error_stats(&self) -> BTreeMap<&'static str, usize> {
+    pub fn error_stats(&self) -> ErrorStats {
         self.error_stats_impl()
             .into_iter()
             .map(|(code, (total, _inserted))| (code, total))
             .collect()
     }
 
-    pub fn error_stats_detailed(&self) -> BTreeMap<&'static str, (usize, usize)> {
+    pub fn error_stats_detailed(&self) -> DetailedErrorStats {
         self.error_stats_impl()
     }
 
@@ -729,12 +732,12 @@ impl ParseReport {
     }
 
 
-    fn error_stats_matching<F>(&self, mut pred: F) -> BTreeMap<&'static str, usize>
+    fn error_stats_matching<F>(&self, mut pred: F) -> ErrorStats
     where
         F: FnMut(&ParseError) -> bool,
     {
-        let mut map: BTreeMap<&'static str, usize> =
-            BTreeMap::new();
+        let mut map: ErrorStats =
+            ErrorStats::new();
         for e in &self.errors {
             if !pred(e) {
                 continue;
@@ -744,11 +747,11 @@ impl ParseReport {
         map
     }
 
-    pub fn real_error_stats(&self) -> BTreeMap<&'static str, usize> {
+    pub fn real_error_stats(&self) -> ErrorStats {
         self.error_stats_matching(|e| !e.is_inserted())
     }
 
-    pub fn inserted_error_stats(&self) -> BTreeMap<&'static str, usize> {
+    pub fn inserted_error_stats(&self) -> ErrorStats {
         self.error_stats_matching(|e| e.is_inserted())
     }
 
@@ -1176,8 +1179,8 @@ impl Parser {
         }
     }
 
-    fn error_stats_impl(&self) -> BTreeMap<&'static str, (usize, usize)> {
-        let mut map: BTreeMap<&'static str, (usize, usize)> = BTreeMap::new();
+    fn error_stats_impl(&self) -> DetailedErrorStats {
+        let mut map: DetailedErrorStats = DetailedErrorStats::new();
         for e in &self.errors {
             let entry = map.entry(e.code).or_insert((0, 0));
             entry.0 += 1;
@@ -1188,11 +1191,11 @@ impl Parser {
         map
     }
 
-    fn error_stats_matching<F>(&self, mut pred: F) -> BTreeMap<&'static str, usize>
+    fn error_stats_matching<F>(&self, mut pred: F) -> ErrorStats
     where
         F: FnMut(&ParseError) -> bool,
     {
-        let mut map: BTreeMap<&'static str, usize> = BTreeMap::new();
+        let mut map: ErrorStats = ErrorStats::new();
         for e in &self.errors {
             if !pred(e) {
                 continue;
@@ -1203,7 +1206,7 @@ impl Parser {
     }
 
     /// Count errors by error code (stable ordering).
-    pub fn error_stats(&self) -> BTreeMap<&'static str, usize> {
+    pub fn error_stats(&self) -> ErrorStats {
         self.error_stats_impl()
             .into_iter()
             .map(|(code, (total, _inserted))| (code, total))
@@ -1211,15 +1214,15 @@ impl Parser {
     }
 
     /// Count errors by code, split into (total, inserted).
-    pub fn error_stats_detailed(&self) -> BTreeMap<&'static str, (usize, usize)> {
+    pub fn error_stats_detailed(&self) -> DetailedErrorStats {
         self.error_stats_impl()
     }
 
-    pub fn real_error_stats(&self) -> BTreeMap<&'static str, usize> {
+    pub fn real_error_stats(&self) -> ErrorStats {
         self.error_stats_matching(|e| !e.is_inserted())
     }
 
-    pub fn inserted_error_stats(&self) -> BTreeMap<&'static str, usize> {
+    pub fn inserted_error_stats(&self) -> ErrorStats {
         self.error_stats_matching(|e| e.is_inserted())
     }
 
