@@ -2022,6 +2022,22 @@ impl Parser {
         }
     }
 
+    fn consume_top_level_recovery_separator(&mut self) {
+        if self.cur_is_punct(";") || self.cur_is_punct(",") || self.cur_is_punct("}") {
+            self.bump();
+        }
+    }
+
+    fn recover_no_progress_at_top_level(&mut self, span: Span) {
+        self.err_push(
+            NO_PROGRESS_ERROR_CODE,
+            NO_PROGRESS_ERROR_MESSAGE.to_string(),
+            span,
+        );
+        self.sync_top_level();
+        self.consume_top_level_recovery_separator();
+    }
+
     fn skip_trivia(&mut self) {
         while let Some(t) = self.cur() {
             if matches!(
@@ -2409,17 +2425,7 @@ impl Parser {
 
             // panic-mode：如果本轮没有消费任何 token，说明进入无法前进的错误状态，进行顶层同步恢复
             if self.i == start_i && !self.at_end() {
-                let sp = self.cur_span();
-                self.err_push(
-                    NO_PROGRESS_ERROR_CODE,
-                    NO_PROGRESS_ERROR_MESSAGE.to_string(),
-                    sp,
-                );
-                self.sync_top_level();
-                // 吃掉明显的分隔符/孤立闭合符，避免下一轮再次卡住
-                if self.cur_is_punct(";") || self.cur_is_punct(",") || self.cur_is_punct("}") {
-                    self.bump();
-                }
+                self.recover_no_progress_at_top_level(self.cur_span());
             }
 
         }
