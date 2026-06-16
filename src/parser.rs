@@ -305,18 +305,25 @@ impl ParseReport {
         idxs
     }
 
-    fn sorted_errors_matching<F>(&self, mut pred: F) -> Vec<&ParseError>
+    fn for_each_error_sorted_matching<P, F>(&self, mut pred: P, mut f: F)
+    where
+        P: FnMut(&ParseError) -> bool,
+        F: FnMut(&ParseError),
+    {
+        for i in self.sorted_error_indices() {
+            let e = &self.errors[i];
+            if pred(e) {
+                f(e);
+            }
+        }
+    }
+
+    fn sorted_errors_matching<F>(&self, pred: F) -> Vec<&ParseError>
     where
         F: FnMut(&ParseError) -> bool,
     {
-        let idxs = self.sorted_error_indices();
         let mut v = Vec::new();
-        for i in idxs {
-            let e = &self.errors[i];
-            if pred(e) {
-                v.push(e);
-            }
-        }
+        self.for_each_error_sorted_matching(pred, |e| v.push(e));
         v
     }
 
@@ -324,10 +331,8 @@ impl ParseReport {
         self.sorted_errors_matching(|_| true)
     }
 
-    pub fn for_each_error_sorted<F: FnMut(&ParseError)>(&self, mut f: F) {
-        for i in self.sorted_error_indices() {
-            f(&self.errors[i]);
-        }
+    pub fn for_each_error_sorted<F: FnMut(&ParseError)>(&self, f: F) {
+        self.for_each_error_sorted_matching(|_| true, f);
     }
 
     fn sorted_errors_by_kind(&self, inserted: bool) -> Vec<&ParseError> {
@@ -382,17 +387,11 @@ impl ParseReport {
 
 
 
-    fn append_sorted_errors_matching<F>(&self, out: &mut String, compact: bool, mut pred: F)
+    fn append_sorted_errors_matching<F>(&self, out: &mut String, compact: bool, pred: F)
     where
         F: FnMut(&ParseError) -> bool,
     {
-        for i in self.sorted_error_indices() {
-            let e = &self.errors[i];
-            if !pred(e) {
-                continue;
-            }
-            Self::append_error(out, e, compact);
-        }
+        self.for_each_error_sorted_matching(pred, |e| Self::append_error(out, e, compact));
     }
 
     fn format_sorted_errors_matching<F>(&self, compact: bool, pred: F) -> String
