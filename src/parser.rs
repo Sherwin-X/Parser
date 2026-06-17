@@ -1236,18 +1236,30 @@ impl Parser {
         rc
     }
 
-    fn first_error_matching<F>(&self, mut pred: F) -> Option<&ParseError>
+    fn for_each_error_sorted_matching<P, F>(&self, mut pred: P, mut f: F)
     where
-        F: FnMut(&ParseError) -> bool,
+        P: FnMut(&ParseError) -> bool,
+        F: FnMut(&ParseError),
     {
         let idxs = self.sorted_error_indices();
         for &i in idxs.iter() {
             let e = &self.errors[i];
             if pred(e) {
-                return Some(e);
+                f(e);
             }
         }
-        None
+    }
+
+    fn first_error_matching<F>(&self, mut pred: F) -> Option<&ParseError>
+    where
+        F: FnMut(&ParseError) -> bool,
+    {
+        let mut first = None;
+        self.for_each_error_sorted_matching(
+            |e| first.is_none() && pred(e),
+            |e| first = Some(e),
+        );
+        first
     }
 
     fn last_error_matching<F>(&self, mut pred: F) -> Option<&ParseError>
@@ -1283,18 +1295,11 @@ impl Parser {
         }
     }
 
-    fn append_errors_sorted_matching<F>(&self, out: &mut String, compact: bool, mut pred: F)
+    fn append_errors_sorted_matching<F>(&self, out: &mut String, compact: bool, pred: F)
     where
         F: FnMut(&ParseError) -> bool,
     {
-        let idxs = self.sorted_error_indices();
-        for &i in idxs.iter() {
-            let e = &self.errors[i];
-            if !pred(e) {
-                continue;
-            }
-            Self::append_error(out, e, compact);
-        }
+        self.for_each_error_sorted_matching(pred, |e| Self::append_error(out, e, compact));
     }
 
     fn format_errors_sorted_matching<F>(&self, compact: bool, pred: F) -> String
@@ -1490,11 +1495,8 @@ impl Parser {
     }
 
     /// Call `f` for each error in stable source order without allocating a Vec of references.
-    pub fn for_each_error_sorted<F: FnMut(&ParseError)>(&self, mut f: F) {
-        let idxs = self.sorted_error_indices();
-        for &i in idxs.iter() {
-            f(&self.errors[i]);
-        }
+    pub fn for_each_error_sorted<F: FnMut(&ParseError)>(&self, f: F) {
+        self.for_each_error_sorted_matching(|_| true, f);
     }
 
     /// First error in source order, if any.
