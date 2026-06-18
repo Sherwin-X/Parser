@@ -27,8 +27,6 @@ const STATS_HEADER: &str = "== Parser error stats ==\n";
 const REAL_STATS_HEADER: &str = "== Parser error stats (real only) ==\n";
 const INSERTED_STATS_HEADER: &str = "== Parser error stats (inserted only) ==\n";
 const DETAILED_STATS_HEADER: &str = "== Parser error stats (total/inserted) ==\n";
-
-
 fn default_max_errors() -> usize {
     static MAX: OnceLock<usize> = OnceLock::new();
     *MAX.get_or_init(|| {
@@ -39,8 +37,6 @@ fn default_max_errors() -> usize {
             .unwrap_or(DEFAULT_MAX_ERRORS)
     })
 }
-
-
 
 /* ===================== AST ===================== */
 
@@ -411,7 +407,11 @@ impl ParseReport {
         self.format_sorted_errors_matching(compact, |e| !e.is_inserted())
     }
 
-    fn format_with_prepended_header(&self, body: String, append_header: fn(&Self, &mut String)) -> String {
+    fn format_with_prepended_header(
+        &self,
+        body: String,
+        append_header: fn(&Self, &mut String),
+    ) -> String {
         if self.errors.is_empty() || body.is_empty() {
             return String::new();
         }
@@ -495,7 +495,12 @@ impl ParseReport {
         self.format_with_stats(self.format_errors_sorted())
     }
 
-    fn append_errors_in_original_order_matching<F>(&self, out: &mut String, compact: bool, mut pred: F)
+    fn append_errors_in_original_order_matching<F>(
+        &self,
+        out: &mut String,
+        compact: bool,
+        mut pred: F,
+    )
     where
         F: FnMut(&ParseError) -> bool,
     {
@@ -619,7 +624,10 @@ impl ParseReport {
     }
 
     pub fn format_real_errors_sorted(&self, include_stats: bool) -> String {
-        self.format_with_optional_real_stats(self.format_real_errors_sorted_impl(false), include_stats)
+        self.format_with_optional_real_stats(
+            self.format_real_errors_sorted_impl(false),
+            include_stats,
+        )
     }
 
     pub fn format_errors_sorted_detailed_stats(&self) -> String {
@@ -1329,7 +1337,11 @@ impl Parser {
         self.format_errors_sorted_matching(compact, |e| !e.is_inserted())
     }
 
-    fn format_with_prepended_header(&self, body: String, append_header: fn(&Self, &mut String)) -> String {
+    fn format_with_prepended_header(
+        &self,
+        body: String,
+        append_header: fn(&Self, &mut String),
+    ) -> String {
         if self.errors.is_empty() || body.is_empty() {
             return String::new();
         }
@@ -1408,7 +1420,12 @@ impl Parser {
     /// Render all accumulated errors into a single string (useful for tests/logging).
     /// If `include_stats` is true, a short per-code summary is prepended.
 
-    fn append_errors_in_original_order_matching<F>(&self, out: &mut String, compact: bool, mut pred: F)
+    fn append_errors_in_original_order_matching<F>(
+        &self,
+        out: &mut String,
+        compact: bool,
+        mut pred: F,
+    )
     where
         F: FnMut(&ParseError) -> bool,
     {
