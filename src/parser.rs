@@ -1254,12 +1254,14 @@ impl Parser {
     where
         F: FnMut(&ParseError) -> bool,
     {
-        let mut first = None;
-        self.for_each_error_sorted_matching(
-            |e| first.is_none() && pred(e),
-            |e| first = Some(e),
-        );
-        first
+        let idxs = self.sorted_error_indices();
+        for &i in idxs.iter() {
+            let e = &self.errors[i];
+            if pred(e) {
+                return Some(e);
+            }
+        }
+        None
     }
 
     fn last_error_matching<F>(&self, mut pred: F) -> Option<&ParseError>
