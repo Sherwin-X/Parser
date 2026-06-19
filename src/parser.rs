@@ -1010,6 +1010,11 @@ impl Parser {
         *self.sorted_errors_cache.borrow_mut() = None;
     }
 
+    fn reset_error_dedupe_state(&mut self) {
+        self.seen_errors.clear();
+        self.invalidate_sorted_errors_cache();
+    }
+
 
     /// Override the maximum number of parser errors before aborting further parsing.
     /// Useful for test harnesses or batch runs.
@@ -1040,9 +1045,9 @@ impl Parser {
     }
 
 
-    /// Take ownership of accumulated errors (leaves the parser with an empty error list).
+    /// Take ownership of accumulated errors and clear related error de-duplication state.
     pub fn take_errors(&mut self) -> Vec<ParseError> {
-        self.invalidate_sorted_errors_cache();
+        self.reset_error_dedupe_state();
         std::mem::take(&mut self.errors)
     }
 
@@ -1050,9 +1055,8 @@ impl Parser {
     /// This does NOT reset the token stream position.
     pub fn clear_errors(&mut self) {
         self.errors.clear();
-        self.seen_errors.clear();
         self.aborted = false;
-        self.invalidate_sorted_errors_cache();
+        self.reset_error_dedupe_state();
     }
 
     /// Convenience helper: parse all items and return (items, errors, aborted).
