@@ -27,15 +27,16 @@ const STATS_HEADER: &str = "== Parser error stats ==\n";
 const REAL_STATS_HEADER: &str = "== Parser error stats (real only) ==\n";
 const INSERTED_STATS_HEADER: &str = "== Parser error stats (inserted only) ==\n";
 const DETAILED_STATS_HEADER: &str = "== Parser error stats (total/inserted) ==\n";
+fn parse_max_errors_env() -> Option<usize> {
+    std::env::var(PARSER_MAX_ERRORS_ENV)
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .filter(|&n| (MIN_MAX_ERRORS..=MAX_MAX_ERRORS).contains(&n))
+}
+
 fn default_max_errors() -> usize {
     static MAX: OnceLock<usize> = OnceLock::new();
-    *MAX.get_or_init(|| {
-        std::env::var(PARSER_MAX_ERRORS_ENV)
-            .ok()
-            .and_then(|v| v.parse::<usize>().ok())
-            .filter(|&n| (MIN_MAX_ERRORS..=MAX_MAX_ERRORS).contains(&n))
-            .unwrap_or(DEFAULT_MAX_ERRORS)
-    })
+    *MAX.get_or_init(|| parse_max_errors_env().unwrap_or(DEFAULT_MAX_ERRORS))
 }
 
 /* ===================== AST ===================== */
