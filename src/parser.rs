@@ -203,9 +203,10 @@ pub enum ParseOutcome {
     Failed,
 }
 
-type ErrorStats = BTreeMap<&'static str, usize>;
-type DetailedErrorStats = BTreeMap<&'static str, (usize, usize)>;
+pub type ErrorStats = BTreeMap<&'static str, usize>;
+pub type DetailedErrorStats = BTreeMap<&'static str, (usize, usize)>;
 
+ 
 impl fmt::Display for ParseOutcome {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
