@@ -1053,8 +1053,9 @@ impl Parser {
 
     /// Take ownership of accumulated errors and clear related error-tracking state.
     pub fn take_errors(&mut self) -> Vec<ParseError> {
+        let errors = std::mem::take(&mut self.errors);
         self.reset_error_state_after_drain();
-        std::mem::take(&mut self.errors)
+        errors
     }
 
     /// Clear accumulated errors and reset related error-tracking state.
