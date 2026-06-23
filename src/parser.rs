@@ -316,12 +316,18 @@ impl ParseReport {
         }
     }
 
-    fn sorted_errors_matching<F>(&self, pred: F) -> Vec<&ParseError>
+    fn sorted_errors_matching<F>(&self, mut pred: F) -> Vec<&ParseError>
     where
         F: FnMut(&ParseError) -> bool,
     {
+        let idxs = self.sorted_error_indices();
         let mut v = Vec::new();
-        self.for_each_error_sorted_matching(pred, |e| v.push(e));
+        for i in idxs {
+            let e = &self.errors[i];
+            if pred(e) {
+                v.push(e);
+            }
+        }
         v
     }
 
