@@ -2299,6 +2299,97 @@ impl Parser {
 
     /* ===================== 入口 ===================== */
 
+    fn parse_top_level_typed_item(&mut self, base_ty: String, ret_ptr: usize) -> Option<Item> {
+        if !self.cur_is(&TokenType::Identifier) {
+            if self.cur_is_punct(";") && Self::is_tag_type_name(&base_ty) {
+                self.bump();
+                return None;
+            }
+            self.err_custom_here("E2101", "expected identifier after type");
+            return None;
+        }
+
+        let name_tok = self.bump().unwrap();
+        let name = name_tok.text().to_string();
+        let name_span = name_tok.span();
+
+        if self.cur_is_punct("(") {
+            let params = self.parse_params();
+            let body = if self.cur_is_punct("{") {
+                self.parse_block()
+            } else {
+                self.err_custom_here("E2003", "function must have a body");
+                Stmt::Empty
+            };
+            return Some(Item::Function {
+                ret: base_ty,
+                ret_ptr,
+                name,
+                name_span,
+                params,
+                body,
+            });
+        }
+
+        let first_dims = self.parse_array_dims_multi();
+        let first_init = if self.cur_is_op("=") {
+            self.bump();
+            Some(self.parse_initializer())
+        } else {
+            None
+        };
+        let mut decls: Vec<(usize, String, Span, Vec<Option<String>>, Option<Init>)> =
+            vec![(ret_ptr, name, name_span, first_dims, first_init)];
+
+        while self.cur_is_punct(",") {
+            self.bump();
+            let ptr = self.parse_pointer_stars();
+            if self.cur_is(&TokenType::Identifier) {
+                let nm_tok = self.bump().unwrap();
+                let nm = nm_tok.text().to_string();
+                let nm_span = nm_tok.span();
+                let dims = self.parse_array_dims_multi();
+                let ini = if self.cur_is_op("=") {
+                    self.bump();
+                    Some(self.parse_initializer())
+                } else {
+                    None
+                };
+                decls.push((ptr, nm, nm_span, dims, ini));
+            } else {
+                self.err_custom_here("E2102", "expected identifier after ',' in declaration");
+                break;
+            }
+        }
+
+        if !self.expect_token_text(";") {
+            self.err_custom_here("E2001", "missing ';' after declaration");
+        }
+
+        for (_, nm, nm_span, dims, ini) in &decls {
+            if let Some(init) = ini {
+                self.validate_array_initializer(nm, *nm_span, dims, init);
+            }
+        }
+
+        let mut stmts = Vec::new();
+        for (ptr, nm, _sp, dims, ini) in decls {
+            stmts.push(Stmt::VarDecl {
+                ty: base_ty.clone(),
+                ptr,
+                name: nm,
+                array_dims: dims,
+                init: ini,
+            });
+        }
+
+        Some(Item::Global(if stmts.len() == 1 {
+            stmts.pop().unwrap()
+        } else {
+            Stmt::Block(stmts)
+        }))
+    }
+
     pub fn parse_items(&mut self) -> Vec<Item> {
         let mut items = vec![];
         while !self.at_end() {
@@ -2368,92 +2459,8 @@ impl Parser {
                 };
                 let ret_ptr = self.parse_pointer_stars();
 
-                if self.cur_is(&TokenType::Identifier) {
-                    let name_tok = self.bump().unwrap();
-                    let name = name_tok.text().to_string();
-                    let name_span = name_tok.span();
-
-                    if self.cur_is_punct("(") {
-                        let params = self.parse_params();
-                        let body = if self.cur_is_punct("{") {
-                            self.parse_block()
-                        } else {
-                            self.err_custom_here("E2003", "function must have a body");
-                            Stmt::Empty
-                        };
-                        items.push(Item::Function {
-                            ret: base_ty,
-                            ret_ptr,
-                            name,
-                            name_span,
-                            params,
-                            body,
-                        });
-                    } else {
-                        let first_dims = self.parse_array_dims_multi();
-                        let first_init = if self.cur_is_op("=") {
-                            self.bump();
-                            Some(self.parse_initializer())
-                        } else {
-                            None
-                        };
-                        let mut decls: Vec<(usize, String, Span, Vec<Option<String>>, Option<Init>)> =
-                            vec![(ret_ptr, name, name_span, first_dims, first_init)];
-
-                        while self.cur_is_punct(",") {
-                            self.bump();
-                            let ptr = self.parse_pointer_stars();
-                            if self.cur_is(&TokenType::Identifier) {
-                                let nm_tok = self.bump().unwrap();
-                                let nm = nm_tok.text().to_string();
-                                let nm_span = nm_tok.span();
-                                let dims = self.parse_array_dims_multi();
-                                let ini = if self.cur_is_op("=") {
-                                    self.bump();
-                                    Some(self.parse_initializer())
-                                } else {
-                                    None
-                                };
-                                decls.push((ptr, nm, nm_span, dims, ini));
-                            } else {
-                                self.err_custom_here(
-                                    "E2102",
-                                    "expected identifier after ',' in declaration",
-                                );
-                                break;
-                            }
-                        }
-                        if !self.expect_token_text(";") {
-                            self.err_custom_here("E2001", "missing ';' after declaration");
-                        }
-
-                        for (_, nm, nm_span, dims, ini) in &decls {
-                            if let Some(init) = ini {
-                                self.validate_array_initializer(nm, *nm_span, dims, init);
-                            }
-                        }
-
-                        let mut stmts = vec![];
-                        for (ptr, nm, _sp, dims, ini) in decls {
-                            stmts.push(Stmt::VarDecl {
-                                ty: base_ty.clone(),
-                                ptr,
-                                name: nm,
-                                array_dims: dims,
-                                init: ini,
-                            });
-                        }
-                        items.push(Item::Global(if stmts.len() == 1 {
-                            stmts.pop().unwrap()
-                        } else {
-                            Stmt::Block(stmts)
-                        }));
-                    }
-                } else if self.cur_is_punct(";") && Self::is_tag_type_name(&base_ty) {
-                    self.bump();
-                    continue;
-                } else {
-                    self.err_custom_here("E2101", "expected identifier after type");
+                if let Some(item) = self.parse_top_level_typed_item(base_ty, ret_ptr) {
+                    items.push(item);
                 }
             } else {
                 let s = self.parse_stmt();
