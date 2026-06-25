@@ -92,7 +92,14 @@ pub struct Param {
     pub array_dims: Vec<Option<String>>,
 }
 
-type VarDeclarator = (usize, String, Span, Vec<Option<String>>, Option<Init>);
+#[derive(Debug, Clone)]
+struct VarDeclarator {
+    ptr: usize,
+    name: String,
+    name_span: Span,
+    array_dims: Vec<Option<String>>,
+    init: Option<Init>,
+}
 
 #[derive(Debug, Clone)]
 pub struct Case {
@@ -2340,7 +2347,13 @@ impl Parser {
         } else {
             None
         };
-        let mut decls: Vec<VarDeclarator> = vec![(ret_ptr, name, name_span, first_dims, first_init)];
+        let mut decls = vec![VarDeclarator {
+            ptr: ret_ptr,
+            name,
+            name_span,
+            array_dims: first_dims,
+            init: first_init,
+        }];
 
         while self.cur_is_punct(",") {
             self.bump();
@@ -2356,7 +2369,13 @@ impl Parser {
                 } else {
                     None
                 };
-                decls.push((ptr, nm, nm_span, dims, ini));
+                decls.push(VarDeclarator {
+                    ptr,
+                    name: nm,
+                    name_span: nm_span,
+                    array_dims: dims,
+                    init: ini,
+                });
             } else {
                 self.err_custom_here("E2102", "expected identifier after ',' in declaration");
                 break;
@@ -2367,20 +2386,20 @@ impl Parser {
             self.err_custom_here("E2001", "missing ';' after declaration");
         }
 
-        for (_, nm, nm_span, dims, ini) in &decls {
-            if let Some(init) = ini {
-                self.validate_array_initializer(nm, *nm_span, dims, init);
+        for decl in &decls {
+            if let Some(init) = &decl.init {
+                self.validate_array_initializer(&decl.name, decl.name_span, &decl.array_dims, init);
             }
         }
 
         let mut stmts = Vec::new();
-        for (ptr, nm, _sp, dims, ini) in decls {
+        for decl in decls {
             stmts.push(Stmt::VarDecl {
                 ty: base_ty.clone(),
-                ptr,
-                name: nm,
-                array_dims: dims,
-                init: ini,
+                ptr: decl.ptr,
+                name: decl.name,
+                array_dims: decl.array_dims,
+                init: decl.init,
             });
         }
 
