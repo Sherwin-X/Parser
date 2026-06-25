@@ -92,6 +92,8 @@ pub struct Param {
     pub array_dims: Vec<Option<String>>,
 }
 
+type VarDeclarator = (usize, String, Span, Vec<Option<String>>, Option<Init>);
+
 #[derive(Debug, Clone)]
 pub struct Case {
     pub label: Option<Expr>, // None = default
@@ -2338,8 +2340,7 @@ impl Parser {
         } else {
             None
         };
-        let mut decls: Vec<(usize, String, Span, Vec<Option<String>>, Option<Init>)> =
-            vec![(ret_ptr, name, name_span, first_dims, first_init)];
+        let mut decls: Vec<VarDeclarator> = vec![(ret_ptr, name, name_span, first_dims, first_init)];
 
         while self.cur_is_punct(",") {
             self.bump();
