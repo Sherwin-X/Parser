@@ -2308,6 +2308,29 @@ impl Parser {
 
     /* ===================== 入口 ===================== */
 
+    fn parse_var_declarator_after_name(
+        &mut self,
+        ptr: usize,
+        name: String,
+        name_span: Span,
+    ) -> VarDeclarator {
+        let array_dims = self.parse_array_dims_multi();
+        let init = if self.cur_is_op("=") {
+            self.bump();
+            Some(self.parse_initializer())
+        } else {
+            None
+        };
+
+        VarDeclarator {
+            ptr,
+            name,
+            name_span,
+            array_dims,
+            init,
+        }
+    }
+
     fn parse_top_level_typed_item(&mut self, base_ty: String, ret_ptr: usize) -> Option<Item> {
         if !self.cur_is(&TokenType::Identifier) {
             if self.cur_is_punct(";") && Self::is_tag_type_name(&base_ty) {
@@ -2340,20 +2363,7 @@ impl Parser {
             });
         }
 
-        let first_dims = self.parse_array_dims_multi();
-        let first_init = if self.cur_is_op("=") {
-            self.bump();
-            Some(self.parse_initializer())
-        } else {
-            None
-        };
-        let mut decls = vec![VarDeclarator {
-            ptr: ret_ptr,
-            name,
-            name_span,
-            array_dims: first_dims,
-            init: first_init,
-        }];
+        let mut decls = vec![self.parse_var_declarator_after_name(ret_ptr, name, name_span)];
 
         while self.cur_is_punct(",") {
             self.bump();
@@ -2362,20 +2372,7 @@ impl Parser {
                 let nm_tok = self.bump().unwrap();
                 let nm = nm_tok.text().to_string();
                 let nm_span = nm_tok.span();
-                let dims = self.parse_array_dims_multi();
-                let ini = if self.cur_is_op("=") {
-                    self.bump();
-                    Some(self.parse_initializer())
-                } else {
-                    None
-                };
-                decls.push(VarDeclarator {
-                    ptr,
-                    name: nm,
-                    name_span: nm_span,
-                    array_dims: dims,
-                    init: ini,
-                });
+                decls.push(self.parse_var_declarator_after_name(ptr, nm, nm_span));
             } else {
                 self.err_custom_here("E2102", "expected identifier after ',' in declaration");
                 break;
