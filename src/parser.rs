@@ -2331,6 +2331,29 @@ impl Parser {
         }
     }
 
+    fn var_declarator_to_stmt(base_ty: &str, decl: VarDeclarator) -> Stmt {
+        Stmt::VarDecl {
+            ty: base_ty.to_string(),
+            ptr: decl.ptr,
+            name: decl.name,
+            array_dims: decl.array_dims,
+            init: decl.init,
+        }
+    }
+
+    fn var_declarators_to_global_item(base_ty: &str, decls: Vec<VarDeclarator>) -> Item {
+        let mut stmts: Vec<Stmt> = decls
+            .into_iter()
+            .map(|decl| Self::var_declarator_to_stmt(base_ty, decl))
+            .collect();
+
+        Item::Global(if stmts.len() == 1 {
+            stmts.pop().unwrap()
+        } else {
+            Stmt::Block(stmts)
+        })
+    }
+
     fn parse_top_level_typed_item(&mut self, base_ty: String, ret_ptr: usize) -> Option<Item> {
         if !self.cur_is(&TokenType::Identifier) {
             if self.cur_is_punct(";") && Self::is_tag_type_name(&base_ty) {
@@ -2389,22 +2412,7 @@ impl Parser {
             }
         }
 
-        let mut stmts = Vec::new();
-        for decl in decls {
-            stmts.push(Stmt::VarDecl {
-                ty: base_ty.clone(),
-                ptr: decl.ptr,
-                name: decl.name,
-                array_dims: decl.array_dims,
-                init: decl.init,
-            });
-        }
-
-        Some(Item::Global(if stmts.len() == 1 {
-            stmts.pop().unwrap()
-        } else {
-            Stmt::Block(stmts)
-        }))
+        Some(Self::var_declarators_to_global_item(&base_ty, decls))
     }
 
     pub fn parse_items(&mut self) -> Vec<Item> {
