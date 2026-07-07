@@ -2354,6 +2354,22 @@ impl Parser {
         })
     }
 
+    fn parse_additional_var_declarators(&mut self, decls: &mut Vec<VarDeclarator>) {
+        while self.cur_is_punct(",") {
+            self.bump();
+            let ptr = self.parse_pointer_stars();
+            if self.cur_is(&TokenType::Identifier) {
+                let nm_tok = self.bump().unwrap();
+                let nm = nm_tok.text().to_string();
+                let nm_span = nm_tok.span();
+                decls.push(self.parse_var_declarator_after_name(ptr, nm, nm_span));
+            } else {
+                self.err_custom_here("E2102", "expected identifier after ',' in declaration");
+                break;
+            }
+        }
+    }
+
     fn parse_top_level_typed_item(&mut self, base_ty: String, ret_ptr: usize) -> Option<Item> {
         if !self.cur_is(&TokenType::Identifier) {
             if self.cur_is_punct(";") && Self::is_tag_type_name(&base_ty) {
@@ -2388,19 +2404,7 @@ impl Parser {
 
         let mut decls = vec![self.parse_var_declarator_after_name(ret_ptr, name, name_span)];
 
-        while self.cur_is_punct(",") {
-            self.bump();
-            let ptr = self.parse_pointer_stars();
-            if self.cur_is(&TokenType::Identifier) {
-                let nm_tok = self.bump().unwrap();
-                let nm = nm_tok.text().to_string();
-                let nm_span = nm_tok.span();
-                decls.push(self.parse_var_declarator_after_name(ptr, nm, nm_span));
-            } else {
-                self.err_custom_here("E2102", "expected identifier after ',' in declaration");
-                break;
-            }
-        }
+        self.parse_additional_var_declarators(&mut decls);
 
         if !self.expect_token_text(";") {
             self.err_custom_here("E2001", "missing ';' after declaration");
