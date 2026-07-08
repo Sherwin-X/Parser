@@ -2370,6 +2370,14 @@ impl Parser {
         }
     }
 
+    fn validate_var_declarator_initializers(&mut self, decls: &[VarDeclarator]) {
+        for decl in decls {
+            if let Some(init) = &decl.init {
+                self.validate_array_initializer(&decl.name, decl.name_span, &decl.array_dims, init);
+            }
+        }
+    }
+
     fn parse_top_level_function_item(
         &mut self,
         ret: String,
@@ -2421,11 +2429,7 @@ impl Parser {
             self.err_custom_here("E2001", "missing ';' after declaration");
         }
 
-        for decl in &decls {
-            if let Some(init) = &decl.init {
-                self.validate_array_initializer(&decl.name, decl.name_span, &decl.array_dims, init);
-            }
-        }
+        self.validate_var_declarator_initializers(&decls);
 
         Some(Self::var_declarators_to_global_item(&base_ty, decls))
     }
