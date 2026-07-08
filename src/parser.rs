@@ -215,7 +215,6 @@ pub enum ParseOutcome {
 pub type ErrorStats = BTreeMap<&'static str, usize>;
 pub type DetailedErrorStats = BTreeMap<&'static str, (usize, usize)>;
 
- 
 impl fmt::Display for ParseOutcome {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -225,7 +224,6 @@ impl fmt::Display for ParseOutcome {
         }
     }
 }
-
 
 #[derive(Debug)]
 pub struct ParseReport {
@@ -398,8 +396,6 @@ impl ParseReport {
         }
     }
 
-
-
     fn append_sorted_errors_matching<F>(&self, out: &mut String, compact: bool, pred: F)
     where
         F: FnMut(&ParseError) -> bool,
@@ -442,7 +438,6 @@ impl ParseReport {
     fn format_with_stats(&self, body: String) -> String {
         self.format_with_prepended_header(body, Self::append_stats_header)
     }
-
 
     fn format_with_real_stats(&self, body: String) -> String {
         self.format_with_prepended_header(body, Self::append_real_stats_header)
@@ -554,7 +549,6 @@ impl ParseReport {
         self.format_errors_in_original_order(false)
     }
 
-
     pub fn format_errors_compact_sorted(&self) -> String {
         self.format_sorted_errors_matching(true, |_| true)
     }
@@ -615,10 +609,8 @@ impl ParseReport {
         self.format_inserted_errors_in_original_order(false)
     }
 
-
     fn error_stats_impl(&self) -> DetailedErrorStats {
-        let mut map: DetailedErrorStats =
-            DetailedErrorStats::new();
+        let mut map = DetailedErrorStats::new();
         for e in &self.errors {
             let entry = map.entry(e.code).or_insert((0, 0));
             entry.0 += 1;
@@ -650,7 +642,6 @@ impl ParseReport {
     pub fn format_errors_sorted_detailed_stats(&self) -> String {
         self.format_with_detailed_stats(self.format_errors_sorted())
     }
-
 
     pub fn as_result(&self) -> Result<&[Item], &[ParseError]> {
         if self.failed() {
@@ -684,7 +675,6 @@ impl ParseReport {
             Err(self.errors)
         }
     }
-
 
     pub fn into_parts(self) -> (Vec<Item>, ParseOutcome, Vec<ParseError>) {
         (self.items, self.outcome, self.errors)
@@ -760,8 +750,7 @@ impl ParseReport {
     where
         F: FnMut(&ParseError) -> bool,
     {
-        let mut map: ErrorStats =
-            ErrorStats::new();
+        let mut map = ErrorStats::new();
         for e in &self.errors {
             if !pred(e) {
                 continue;
@@ -778,7 +767,6 @@ impl ParseReport {
     pub fn inserted_error_stats(&self) -> ErrorStats {
         self.error_stats_matching(|e| e.is_inserted())
     }
-
 }
 
 impl fmt::Display for ParseReport {
@@ -936,7 +924,6 @@ impl ParseError {
     pub fn is_inserted(&self) -> bool {
         self.code == INSERTED_TOKEN_ERROR_CODE
     }
-
 }
 
 
@@ -1036,7 +1023,6 @@ impl Parser {
         self.reset_error_dedupe_state();
     }
 
-
     /// Override the maximum number of parser errors before aborting further parsing.
     /// Useful for test harnesses or batch runs.
     pub fn set_max_errors(&mut self, limit: usize) {
@@ -1113,7 +1099,11 @@ impl Parser {
         let items = self.parse_items();
         let outcome = self.outcome();
         let errors = self.errors;
-        ParseReport { items, outcome, errors }
+        ParseReport {
+            items,
+            outcome,
+            errors,
+        }
     }
 
     /// Number of errors collected so far.
