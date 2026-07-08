@@ -2370,6 +2370,31 @@ impl Parser {
         }
     }
 
+    fn parse_top_level_function_item(
+        &mut self,
+        ret: String,
+        ret_ptr: usize,
+        name: String,
+        name_span: Span,
+    ) -> Item {
+        let params = self.parse_params();
+        let body = if self.cur_is_punct("{") {
+            self.parse_block()
+        } else {
+            self.err_custom_here("E2003", "function must have a body");
+            Stmt::Empty
+        };
+
+        Item::Function {
+            ret,
+            ret_ptr,
+            name,
+            name_span,
+            params,
+            body,
+        }
+    }
+
     fn parse_top_level_typed_item(&mut self, base_ty: String, ret_ptr: usize) -> Option<Item> {
         if !self.cur_is(&TokenType::Identifier) {
             if self.cur_is_punct(";") && Self::is_tag_type_name(&base_ty) {
@@ -2385,21 +2410,7 @@ impl Parser {
         let name_span = name_tok.span();
 
         if self.cur_is_punct("(") {
-            let params = self.parse_params();
-            let body = if self.cur_is_punct("{") {
-                self.parse_block()
-            } else {
-                self.err_custom_here("E2003", "function must have a body");
-                Stmt::Empty
-            };
-            return Some(Item::Function {
-                ret: base_ty,
-                ret_ptr,
-                name,
-                name_span,
-                params,
-                body,
-            });
+            return Some(self.parse_top_level_function_item(base_ty, ret_ptr, name, name_span));
         }
 
         let mut decls = vec![self.parse_var_declarator_after_name(ret_ptr, name, name_span)];
