@@ -2424,6 +2424,37 @@ impl Parser {
         Some(Self::var_declarators_to_global_item(&base_ty, decls))
     }
 
+    fn parse_top_level_struct_or_union_def(&mut self) -> Option<Item> {
+        if !(self.cur_is_kw("struct") || self.cur_is_kw("union")) {
+            return None;
+        }
+
+        let mark = self.save();
+        let kw_tok = self.bump().unwrap();
+        let kind = if kw_tok.text() == "struct" {
+            StructKind::Struct
+        } else {
+            StructKind::Union
+        };
+        let name = if self.cur_is(&TokenType::Identifier) {
+            self.bump().unwrap().text().to_string()
+        } else {
+            self.err_custom_here("E5201", "expected tag name after 'struct'/'union'");
+            "_anon".into()
+        };
+
+        if self.cur_is_punct("{") {
+            let fields = self.parse_struct_body_fields();
+            if !self.expect_token_text(";") {
+                self.err_custom_here("E2001", "missing ';' after struct/union definition");
+            }
+            Some(Item::StructDef { kind, name, fields })
+        } else {
+            self.restore(mark);
+            None
+        }
+    }
+
     pub fn parse_items(&mut self) -> Vec<Item> {
         let mut items = vec![];
         while !self.at_end() {
@@ -2439,30 +2470,9 @@ impl Parser {
                 continue;
             }
 
-            if self.cur_is_kw("struct") || self.cur_is_kw("union") {
-                let mark = self.save();
-                let kw_tok = self.bump().unwrap();
-                let kind = if kw_tok.text() == "struct" {
-                    StructKind::Struct
-                } else {
-                    StructKind::Union
-                };
-                let name = if self.cur_is(&TokenType::Identifier) {
-                    self.bump().unwrap().text().to_string()
-                } else {
-                    self.err_custom_here("E5201", "expected tag name after 'struct'/'union'");
-                    "_anon".into()
-                };
-                if self.cur_is_punct("{") {
-                    let fields = self.parse_struct_body_fields();
-                    if !self.expect_token_text(";") {
-                        self.err_custom_here("E2001", "missing ';' after struct/union definition");
-                    }
-                    items.push(Item::StructDef { kind, name, fields });
-                    continue;
-                } else {
-                    self.restore(mark);
-                }
+            if let Some(item) = self.parse_top_level_struct_or_union_def() {
+                items.push(item);
+                continue;
             }
 
             if self.cur_is_kw("enum") {
