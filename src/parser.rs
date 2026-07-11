@@ -26,7 +26,8 @@ const TOO_MANY_ERRORS_HELP: &str =
 const STATS_HEADER: &str = "== Parser error stats ==\n";
 const REAL_STATS_HEADER: &str = "== Parser error stats (real only) ==\n";
 const INSERTED_STATS_HEADER: &str = "== Parser error stats (inserted only) ==\n";
-const DETAILED_STATS_HEADER: &str = "== Parser error stats (total/inserted) ==\n";
+const DETAILED_STATS_HEADER: &str =
+    "== Parser error stats (total/inserted) ==\n";
 fn parse_max_errors_env() -> Option<usize> {
     std::env::var(PARSER_MAX_ERRORS_ENV)
         .ok()
@@ -2455,8 +2456,32 @@ impl Parser {
         }
     }
 
+    fn parse_top_level_enum_def(&mut self) -> Option<Item> {
+        if !self.cur_is_kw("enum") {
+            return None;
+        }
+
+        let mark = self.save();
+        self.bump();
+
+        let name = if self.cur_is(&TokenType::Identifier) {
+            self.bump().unwrap().text().to_string()
+        } else {
+            self.err_custom_here("E5202", "expected enum tag name");
+            "_anon".into()
+        };
+
+        if self.cur_is_punct("{") {
+            Some(self.parse_enum_def(name))
+        } else {
+            self.restore(mark);
+            None
+        }
+    }
+
     pub fn parse_items(&mut self) -> Vec<Item> {
-        let mut items = vec![];
+        let mut items = Vec::new();
+
         while !self.at_end() {
             self.skip_trivia();
             if self.at_end() {
@@ -2475,56 +2500,41 @@ impl Parser {
                 continue;
             }
 
-            if self.cur_is_kw("enum") {
-                let mark = self.save();
-                self.bump(); // 'enum'
-                let name = if self.cur_is(&TokenType::Identifier) {
-                    self.bump().unwrap().text().to_string()
-                } else {
-                    self.err_custom_here("E5202", "expected enum tag name");
-                    "_anon".into()
-                };
-                if self.cur_is_punct("{") {
-                    let item = self.parse_enum_def(name);
-                    items.push(item);
-                    continue;
-                } else {
-                    self.restore(mark);
-                }
+            if let Some(item) = self.parse_top_level_enum_def() {
+                items.push(item);
+                continue;
             }
 
             if self.peek_type_start() {
                 let base_ty = match self.parse_decl_base_type() {
-                    Some(t) => t,
+                    Some(ty) => ty,
                     None => {
                         self.err_custom_here("E2100", "invalid type specifier");
                         continue;
                     }
                 };
-                let ret_ptr = self.parse_pointer_stars();
 
-                if let Some(item) = self.parse_top_level_typed_item(base_ty, ret_ptr) {
+                let ptr = self.parse_pointer_stars();
+
+                if let Some(item) = self.parse_top_level_typed_item(base_ty, ptr) {
                     items.push(item);
                 }
             } else {
-                let s = self.parse_stmt();
-                items.push(Item::Global(s));
+                items.push(Item::Global(self.parse_stmt()));
             }
 
-            // panic-mode：如果本轮没有消费任何 token，说明进入无法前进的错误状态，进行顶层同步恢复
+            // Panic-mode recovery: every loop iteration must consume input.
             if self.i == start_i && !self.at_end() {
                 self.recover_no_progress_at_top_level(self.cur_span());
             }
-
         }
 
-        // 解析完所有 item 后，做语义检查
         self.check_labels_and_gotos(&items);
         self.check_loops_and_breaks(&items);
         self.check_function_returns(&items);
         self.check_switch_cases(&items);
         self.check_function_redefinitions(&items);
-        self.check_unreachable(&items); // unreachable（增强版）
+        self.check_unreachable(&items);
 
         items
     }
