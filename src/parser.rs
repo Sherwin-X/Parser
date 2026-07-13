@@ -1794,7 +1794,7 @@ impl Parser {
         }
         self.seen_errors.insert(key);
 
-        if self.errors.len() >= self.max_errors_limit.saturating_sub(1) {
+        if self.errors.len() >= self.max_errors_limit {
             self.abort_with_too_many_errors(span);
             return;
         }
@@ -1975,7 +1975,16 @@ impl Parser {
     /// Statement-level panic-mode recovery: skip tokens until a likely statement boundary.
     /// This reduces cascade errors compared to token-level sync().
     fn sync_stmt(&mut self) {
-        if !self.at_end() {
+        let already_at_boundary = self.at_end()
+            || self.cur_is_punct(";")
+            || self.cur_is_punct("}")
+            || self.cur_is_punct(":")
+            || self.cur_is_kw("case")
+            || self.cur_is_kw("default")
+            || self.cur_is_kw("else")
+            || self.is_stmt_start();
+
+        if !already_at_boundary {
             self.i += 1;
         }
 
@@ -1983,12 +1992,19 @@ impl Parser {
             if self.cur_is_punct(";") || self.cur_is_punct("}") {
                 return;
             }
-            if self.cur_is_punct(":") || self.cur_is_kw("case") || self.cur_is_kw("default") || self.cur_is_kw("else") {
+
+            if self.cur_is_punct(":")
+                || self.cur_is_kw("case")
+                || self.cur_is_kw("default")
+                || self.cur_is_kw("else")
+            {
                 return;
             }
+
             if self.is_stmt_start() {
                 return;
             }
+
             self.i += 1;
         }
     }
