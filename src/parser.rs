@@ -1783,7 +1783,13 @@ impl Parser {
 
     
 
-    fn push_error(&mut self, code: &'static str, message: String, span: Span, help: Option<String>) {
+    fn push_error(
+        &mut self,
+        code: &'static str,
+        message: String,
+        span: Span,
+        help: Option<String>,
+    ) {
         if self.aborted {
             return;
         }
@@ -1792,26 +1798,21 @@ impl Parser {
         if self.seen_errors.contains(&key) {
             return;
         }
-        self.seen_errors.insert(key);
 
-        if self.errors.len() >= self.max_errors_limit {
+        // 为合成的 E9999 中止错误预留最后一个位置，
+        // 确保 errors.len() 永远不会超过 max_errors_limit。
+        if self.errors.len() >= self.max_errors_limit.saturating_sub(1) {
             self.abort_with_too_many_errors(span);
             return;
         }
 
-        self.errors.push(self.make_parse_error(code, message, span, help));
+        // 只有错误真正被记录后，才写入去重集合。
+        self.seen_errors.insert(key);
+
+        let error = self.make_parse_error(code, message, span, help);
+        self.errors.push(error);
         self.invalidate_sorted_errors_cache();
     }
-
-    fn err_push(&mut self, code: &'static str, message: String, span: Span) {
-        self.push_error(code, message, span, None);
-    }
-
-    fn err_push_help(&mut self, code: &'static str, message: String, span: Span, help: Option<String>) {
-        self.push_error(code, message, span, help);
-    }
-
-
 
 
     fn err_expect(&mut self, expected: &str) {
