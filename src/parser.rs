@@ -813,6 +813,37 @@ impl ParseError {
         col
     }
 
+    fn visual_span_len(
+        raw_line: &str,
+        start_col: usize,
+        byte_len: usize,
+        tab_width: usize,
+    ) -> usize {
+        if byte_len == 0 {
+            return 1;
+        }
+
+        let start_char = start_col.saturating_sub(1);
+        let mut consumed_bytes = 0usize;
+        let mut visual_len = 0usize;
+
+        for ch in raw_line.chars().skip(start_char) {
+            if consumed_bytes >= byte_len {
+                break;
+            }
+
+            consumed_bytes += ch.len_utf8();
+            if ch == '\t' {
+                let next = ((visual_len / tab_width) + 1) * tab_width;
+                visual_len = next;
+            } else {
+                visual_len += 1;
+            }
+        }
+
+        visual_len.max(1)
+    }
+
     fn header_line(&self) -> String {
         format!(
             "{}: {} at {}:{}",
@@ -864,7 +895,12 @@ impl ParseError {
         }
 
         let caret_pos = vcol.saturating_sub(start) + if left_ellipsis { 1 } else { 0 };
-        let mut caret_len = self.span.len.max(1);
+        let mut caret_len = Self::visual_span_len(
+            raw_line,
+            self.span.col,
+            self.span.len,
+            tab_width,
+        );
         let max_caret = max_width.saturating_sub(caret_pos).max(1);
         if caret_len > max_caret {
             caret_len = max_caret;
